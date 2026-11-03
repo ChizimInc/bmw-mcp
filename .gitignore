@@ -1,0 +1,21 @@
+# mediu virtual si cache
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# date de la masina (raman in afara repo-ului)
+bmw-data/
+sesiuni/
+logger.lock
+*.csv
+
+# documente interne (context despre masina concreta, cai locale)
+BMW_CONTEXT.md
+CLAUDE.md
+PLAN_LOGGER.md
+
+# editor / sistem
+.vscode/
+.idea/
+Thumbs.db

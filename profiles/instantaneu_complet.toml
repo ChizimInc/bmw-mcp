@@ -1,0 +1,24 @@
+nume = "instantaneu_complet"
+descriere = "O singură trecere prin toate joburile utile (identificare, erori cu detalii, valori), apoi se oprește singur. La începutul fiecărei zile de test."
+ecu = "MEV9N46L"
+cicluri_max = 1               # un singur ciclu, apoi stop
+erori_la_start = true
+erori_la_stop = false
+# Fara AIF_LESEN (contine VIN-ul).
+instantaneu_la_start = [
+  "IDENT", "ZIF_LESEN", "DATEN_REFERENZ_LESEN", "HARDWARE_REFERENZ_LESEN",
+  "STATUS_MESSWERTE", "STATUS_FASTA1", "STATUS_FASTA2", "STATUS_LAUFUNRUHE", "STATUS_FUNKTIONSSTATI",
+  "STATUS_L_SONDE", "STATUS_L_SONDE_2", "STATUS_L_SONDE_H", "STATUS_L_SONDE_2_H",
+  "STATUS_GEMISCH", "STATUS_VVT", "STATUS_GEBERRAD_ADAPTION", "STATUS_READINESS",
+  "STATUS_MOTORDREHZAHL", "STATUS_MOTORTEMPERATUR", "STATUS_AN_LUFTTEMPERATUR", "STATUS_UBATT",
+  "STATUS_LMM_MASSE", "STATUS_PWG_POTI_SPANNUNG", "STATUS_LLABG", "STATUS_DKHFM", "STATUS_SAUGROHR",
+  "STATUS_SYSTEMCHECK_KAT", "STATUS_SYSTEMCHECK_LAMBDA_AUS",
+]
+
+# Un rand in CSV cu valorile de baza, ca sa se poata compara usor intre zile.
+[[grup]]
+nume = "baza"
+la_fiecare_s = 0
+  [[grup.citire]]
+  job = "STATUS_MESSWERTE"
+  valori = { rpm = "STAT_NMOT_WERT", tmot = "STAT_TMOT_WERT", taer = "STAT_TANS_WERT", ub = "STAT_UB_WERT", maf = "STAT_MSHFM_WERT", fr1 = "STAT_FR_WERT", fr2 = "STAT_FR2_WERT" }

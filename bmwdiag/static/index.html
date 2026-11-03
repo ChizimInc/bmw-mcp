@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Logger BMW E90</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Logger BMW E90 320i <span class="mic">(doar citire)</span></h1>
+  <p class="avertisment" id="avertisment">Cât timp înregistrezi, nu folosi serverul MCP din chat.</p>
+  <p class="conexiune" id="conexiune" hidden>Serverul loggerului nu răspunde. Rulează încă fereastra loggerului?</p>
+</header>
+
+<main>
+  <section class="panou" aria-labelledby="t-control">
+    <h2 id="t-control">Înregistrare</h2>
+    <div class="formular">
+      <label>Profil
+        <select id="profil"></select>
+      </label>
+      <p class="descriere" id="descriere"></p>
+      <fieldset>
+        <legend>Motorul este</legend>
+        <label><input type="radio" name="conditie" value="rece"> rece</label>
+        <label><input type="radio" name="conditie" value="cald"> cald</label>
+        <label><input type="radio" name="conditie" value="necunoscut" checked> nu știu</label>
+      </fieldset>
+      <label>Notă (opțional)
+        <textarea id="nota" rows="2" placeholder="ex.: 7 °C afară, după 25 min de mers"></textarea>
+      </label>
+      <div class="butoane">
+        <button id="start" class="principal">Start</button>
+        <button id="stop" class="pericol">Stop</button>
+        <button id="erori">Citește erorile acum</button>
+      </div>
+      <p class="mesaj" id="mesaj" role="status"></p>
+    </div>
+  </section>
+
+  <section class="panou" aria-labelledby="t-stare">
+    <h2 id="t-stare">Stare</h2>
+    <dl class="stare">
+      <dt>Stare</dt><dd><span id="s-stare" class="eticheta">–</span></dd>
+      <dt>Ultima citire reușită</dt><dd><span id="s-ultima" class="eticheta">–</span></dd>
+      <dt>Profil</dt><dd id="s-profil">–</dd>
+      <dt>Sursa</dt><dd id="s-sursa">–</dd>
+      <dt>Timp scurs</dt><dd id="s-timp">–</dd>
+      <dt>Rânduri scrise</dt><dd id="s-randuri">–</dd>
+      <dt>Cicluri pe secundă</dt><dd id="s-cps">–</dd>
+      <dt>Erori de citire</dt><dd id="s-erori">–</dd>
+      <dt>Steaguri</dt><dd id="s-steaguri">–</dd>
+      <dt>Folder</dt><dd id="s-folder" class="cale">–</dd>
+    </dl>
+  </section>
+
+  <section class="panou" aria-labelledby="t-marcaje">
+    <h2 id="t-marcaje">Marcaje <span class="mic">(sau tastele 1–9)</span></h2>
+    <div id="marcaje" class="marcaje"><p class="gol">Apar după Start.</p></div>
+  </section>
+
+  <section class="panou" aria-labelledby="t-valori">
+    <h2 id="t-valori">Ultimele valori</h2>
+    <table class="valori">
+      <thead><tr><th>Mărime</th><th>Valoare</th><th>Unitate</th></tr></thead>
+      <tbody id="valori"><tr><td colspan="3" class="gol">Nicio valoare încă.</td></tr></tbody>
+    </table>
+  </section>
+
+  <section class="panou lat" aria-labelledby="t-jurnal">
+    <h2 id="t-jurnal">Jurnal <span class="mic">(cel mai nou sus)</span></h2>
+    <ol id="jurnal" class="jurnal" reversed></ol>
+  </section>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

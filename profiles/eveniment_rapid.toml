@@ -1,0 +1,55 @@
+nume = "eveniment_rapid"
+descriere = "Bucla cea mai rapidă: cuplarea ambreiajului, accelerări. Pornește-l înainte de manevră."
+ecu = "MEV9N46L"
+segment_minute = 0            # 0 = un singur fișier
+durata_max_minute = 0         # 0 = până la Stop
+erori_la_start = true
+erori_la_stop = true
+erori_interval_minute = 0     # 0 = doar la start/stop
+instantaneu_la_start = ["IDENT", "ZIF_LESEN", "DATEN_REFERENZ_LESEN", "STATUS_GEMISCH", "STATUS_GEBERRAD_ADAPTION", "STATUS_FUNKTIONSSTATI", "STATUS_READINESS"]
+
+[[grup]]
+nume = "rapid"
+la_fiecare_s = 0              # 0 = în fiecare ciclu
+  [[grup.citire]]
+  job = "STATUS_MESSWERTE"
+  valori = { rpm = "STAT_NMOT_WERT", rpm_tinta = "STAT_NSOL_WERT", tmot = "STAT_TMOT_WERT", taer = "STAT_TANS_WERT", ub = "STAT_UB_WERT", viteza = "STAT_VFZG_WERT", upedala = "STAT_UPWG_WERT", maf = "STAT_MSHFM_WERT", cuplu = "STAT_MIIST_WERT", fr1 = "STAT_FR_WERT", fr2 = "STAT_FR2_WERT", te = "STAT_TE_WERT", clapeta = "STAT_WDKBA_WERT", avans = "STAT_ZWOUT_WERT", came_ev = "STAT_WNWKWA_WERT", came_adm = "STAT_WNWKWE_WERT" }
+  [[grup.citire]]
+  job = "STATUS_FASTA2"
+  valori = { sarcina = "STAT_RL_WERT", sarcina_tinta = "STAT_RLSOL_WERT", pedala = "STAT_WPED_WERT", te2 = "STAT_TE2_WERT", llr_int = "STAT_DMLLRI_WERT" }
+
+[[grup]]
+nume = "lent"
+la_fiecare_s = 5
+  [[grup.citire]]
+  job = "STATUS_LAUFUNRUHE"
+  valori = { lu1 = "STAT_LUTSFI1_WERT", lu2 = "STAT_LUTSFI2_WERT", lu3 = "STAT_LUTSFI3_WERT", lu4 = "STAT_LUTSFI4_WERT" }
+
+[[marcaj]]
+eticheta = "Cuplez ambreiajul"
+tasta = "1"
+[[marcaj]]
+eticheta = "Simt problema"
+tasta = "2"
+[[marcaj]]
+eticheta = "Accelerez tare"
+tasta = "3"
+
+[[steag]]
+nume = "cadere_la_cuplare"
+tip = "cadere"                # valoarea scade cu cel puțin `cu` în cel mult `in_s`
+camp = "rpm"
+cu = 150
+in_s = 1.5
+conditii = ["pedala < 2", "viteza < 15"]
+[[steag]]
+nume = "tmot_prag"
+tip = "trece_prag"
+camp = "tmot"
+praguri = [40, 60, 80]
+[[steag]]
+nume = "tensiune_mica"
+tip = "sub"
+camp = "ub"
+valoare = 12.0
+timp_s = 3

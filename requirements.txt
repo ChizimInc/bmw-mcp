@@ -1,0 +1,2 @@
+# Instalat de setup.bat in pasi separati (vezi explicatia din setup.bat)
+pydiabas
