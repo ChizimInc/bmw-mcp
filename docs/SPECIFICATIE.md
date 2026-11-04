@@ -1,0 +1,324 @@
+# Specificație: logger de diagnostic EDIABAS (BMW N46 / Bosch MEV9) cu interfață web locală
+
+Document public. Descrie CE construim și CUM. Numerotarea secțiunilor e păstrată din planul original; secțiunea 4 (joburile verificate) e în `docs/JOBURI_MEV9N46L.md`. Notele despre o mașină anume (istoric, simptome, ipoteze, planul de analiză) NU sunt în repo; stau local.
+
+## 0. Scopul
+
+Un logger local care înregistrează, fără un asistent AI în buclă, date de la calculatorul motorului (DME) în timpul mersului și la ralanti, la rece și la cald, pentru analiză ulterioară (compararea sesiunilor rece vs cald).
+
+Cerințe de design (decise):
+
+1. Interfață web locală, în browser. FĂRĂ grafice live pe ecranul de înregistrare: doar jurnal live și stare, ca să se vadă că nu s-a blocat și că se scriu date.
+2. Profile declarative (fișiere TOML), alese din interfață, ca tipul de test să se schimbe fără cod.
+3. Între datele citite trebuie să fie și sarcina motorului (cât de încărcat e motorul acum).
+4. Un profil de lungă durată (pornit la începutul drumului, aproximativ 30 de minute prin oraș).
+5. Salvare automată, steaguri (marcaje manuale și automate), teste la rece și la cald.
+
+## 1. Mediul
+
+- Laptop Windows 11 x64. EDIABAS 7.3.0 în `C:\EDIABAS` (`Bin\api32.dll` e pe 32 de biți). INPA 5.0.6 în `C:\EC-APPS\INPA` (opțional).
+- Interfață: `C:\EDIABAS\Bin\EDIABAS.INI` → `Interface = STD:OBD`; `C:\EDIABAS\Bin\obd.ini` → `Port=Com1` (portul cablului).
+- Cablu: K+DCAN cu cip FTDI, latency timer 1 ms.
+- Python: 3.13 pe 32 de biți. NU se folosește un Python pe 64 de biți.
+- Mediu virtual: `.venv` în rădăcina proiectului (creat de `setup.bat`). Conține `pydiabas` 1.2.0 și `mcp` 1.30.0 (instalat `--no-deps`, fiindcă `cryptography` nu are pachet pentru Python 32-bit), plus dependențele mcp: `starlette`, `uvicorn`, `pydantic`, `anyio` etc.
+- Folderul de date: `Documents\bmw-data` (schimbabil cu `BMW_DATA_DIR` sau `--date`).
+- Calculatorul motorului: Bosch MEV9 pentru N46, variantă SGBD `MEV9N46L`. Grupul `D_MOTOR` rezolvă automat la această variantă. NU `MSV70` (variantă greșită, dă valori absurde).
+- Comunicarea e KWP2000 pe K-line (telegramele arată `83 12 F1 22 ...`), deci lentă: câteva citiri de job pe secundă. Viteza reală e măsurată de logger (cicluri/s în `sesiune.json`).
+
+## 2. Constrângeri dure
+
+- Totul rulează în Python-ul de 32 de biți din `.venv`. Nu instala pachete care cer compilare (fără wheel win32). Preferă biblioteca standard.
+- DOAR CITIRE. Refolosește exact regulile din `server.py`:
+  - permise: `^(STATUS_\w+|\w+_LESEN(_DETAIL)?|LESE_\w+|IDENT\w*|INFO|_\w+)$`
+  - refuzate (chiar dacă trec mai sus): `LOESCH|SCHREIB|STEUERN|FLASH|PROGRAM|RESET|CODIER.*(SCHREIB|LOESCH)|SET_|WRITE|ERASE|DELETE` (fără diferență de majuscule)
+  - Garda se aplică la încărcarea profilului ȘI la fiecare apel. Un profil cu job refuzat nu se încarcă.
+- Nu ștergi erori, nu codezi, nu modifici `C:\EDIABAS` fără acordul explicit al proprietarului.
+- EDIABAS acceptă o singură sesiune pe port. Cât timp rulează loggerul, serverul MCP `bmw-ediabas` (folosit din chat) nu trebuie să citească. Comportamentul la conflict nu a fost testat; presupune conflict și afișează un avertisment clar în interfață și în README.
+- `stdout` nu e folosit pentru protocol aici (spre deosebire de server.py), dar loggerul scrie jurnalul și în fișier.
+- Fără date personale în fișierele partajate: rezultatele `AIF_LESEN` conțin VIN-ul. Se pot salva local în instantaneu, dar nu se pun în rezumate sau în documente de proiect.
+
+## 3. PyDIABAS: ce știm sigur
+
+- Import: `from pydiabas import PyDIABAS`. Înainte de import, adaugă `C:\EDIABAS\Bin` în `PATH` și apelează `os.add_dll_directory(...)` (vezi `server.py`).
+- Sesiune: `p = PyDIABAS(); p.start()` ... `p.end()`, sau `with PyDIABAS() as p:`. `p.reset()` = end + start.
+- Job: `res = p.job(ecu, job, parameters="", result_filter="")`. `parameters` și `result_filter` sunt șiruri separate prin `;`.
+- La eșec ridică `StateError` (ex.: `IFH-0018: INITIALIZATION ERROR` = port COM indisponibil; `SYS-0010: INITIALIZATION ERROR` = ECU nu răspunde; `IFH-0006: COMMAND NOT ACCEPTED` = cablu nepus în mașină sau contact oprit).
+- Rezultat: `res.as_dicts()` → listă de dicționare: elementul 0 e setul de sistem (OBJECT, SAETZE, JOBNAME, VARIANTE, JOBSTATUS...), următoarele sunt seturile de date. Valorile pot fi `bytes` (decodează ca în `server.py::_clean`). `JOB_STATUS` = `"OKAY"` la succes; altfel text de eroare, de ex. `ERROR_ECU_SUBFUNCTION_NOT_SUPPORTED__INVALID_FORMAT`, `ERROR_ECU_SERVICE_NOT_SUPPORTED`.
+- `result_filter` reduce mult răspunsul și trebuie folosit în bucla rapidă.
+- ECU simulat `TMODE` (job `LESE_INTERFACE_TYP`, rezultat `TYP` = `b'OBD'`) merge fără mașină și fără cablu: folosește-l pentru testul de integrare EDIABAS acasă.
+- Pentru viteză, loggerul ține O SINGURĂ sesiune deschisă pe toată durata înregistrării (nu `with` per job, cum face server.py). La erori repetate face `reset()`.
+
+## 4. Joburi și rezultate verificate
+
+Vezi `docs/JOBURI_MEV9N46L.md`.
+
+## 5. Arhitectura
+
+```
+bmw-mcp/
+  server.py                 # serverul MCP existent; NU îl strica
+  bmwdiag/
+    __init__.py
+    guard.py                # regulile doar-citire (copiate din server.py, apoi server.py le poate importa)
+    ediabas_client.py       # sesiune persistentă PyDIABAS, run_job(), decodare, retry/reset
+    sources.py              # EdiabasSource (real) + FakeSource (date sintetice) + ReplaySource (CSV vechi)
+    profiles.py             # încărcare și validare TOML (tomllib din biblioteca standard)
+    flags.py                # motorul de reguli pentru steaguri automate
+    recorder.py             # bucla de citire, scrierea CSV, segmente, evenimente, instantanee
+    webapp.py               # server HTTP (biblioteca standard) + API JSON
+    static/index.html, app.js, style.css
+  profiles/*.toml
+  start_logger.bat          # pornește aplicația cu .venv\Scripts\python.exe și deschide browserul
+  tests/
+```
+
+Decizii:
+- Server web: `http.server.ThreadingHTTPServer` din biblioteca standard, legat la `127.0.0.1:8765` (opțional `--host 0.0.0.0` pentru telefon, implicit OPRIT). Pagina face polling la 1 s pe API. Fără framework (evită probleme de pachete pe 32 de biți). (Alternativa: `starlette`/`uvicorn` sunt deja în `.venv` din cauza mcp; folosește-le doar dacă biblioteca standard devine incomodă.)
+- Bucla de citire rulează într-un fir separat; interfața doar citește starea printr-un obiect protejat cu lock și trimite comenzi (start/stop/marcaj).
+- O singură instanță: la pornire creează un fișier de blocare în `bmw-data` și refuză a doua pornire.
+- Laptopul nu trebuie să adoarmă cât înregistrează: `ctypes.windll.kernel32.SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)` la start, resetat la stop.
+
+## 6. Profile (TOML)
+
+Fiecare profil e un fișier în `profiles/`. Validare strictă la încărcare (câmpuri lipsă, joburi refuzate de gardă, alias-uri duplicate → eroare clară în interfață).
+
+```toml
+nume = "eveniment_rapid"
+descriere = "Bucla cea mai rapidă: cuplarea ambreiajului, accelerări. Pornește-l înainte de manevră."
+ecu = "MEV9N46L"
+segment_minute = 0            # 0 = un singur fișier
+durata_max_minute = 0         # 0 = până la Stop
+erori_la_start = true
+erori_la_stop = true
+erori_interval_minute = 0     # 0 = doar la start/stop
+instantaneu_la_start = ["IDENT", "ZIF_LESEN", "DATEN_REFERENZ_LESEN", "STATUS_GEMISCH", "STATUS_GEBERRAD_ADAPTION", "STATUS_FUNKTIONSSTATI", "STATUS_READINESS"]
+
+[[grup]]
+nume = "rapid"
+la_fiecare_s = 0              # 0 = în fiecare ciclu
+  [[grup.citire]]
+  job = "STATUS_MESSWERTE"
+  valori = { rpm = "STAT_NMOT_WERT", rpm_tinta = "STAT_NSOL_WERT", tmot = "STAT_TMOT_WERT", taer = "STAT_TANS_WERT", ub = "STAT_UB_WERT", viteza = "STAT_VFZG_WERT", upedala = "STAT_UPWG_WERT", maf = "STAT_MSHFM_WERT", cuplu = "STAT_MIIST_WERT", fr1 = "STAT_FR_WERT", fr2 = "STAT_FR2_WERT", te = "STAT_TE_WERT", clapeta = "STAT_WDKBA_WERT", avans = "STAT_ZWOUT_WERT", came_ev = "STAT_WNWKWA_WERT", came_adm = "STAT_WNWKWE_WERT" }
+  [[grup.citire]]
+  job = "STATUS_FASTA2"
+  valori = { sarcina = "STAT_RL_WERT", sarcina_tinta = "STAT_RLSOL_WERT", pedala = "STAT_WPED_WERT", te2 = "STAT_TE2_WERT", llr_int = "STAT_DMLLRI_WERT" }
+
+[[grup]]
+nume = "lent"
+la_fiecare_s = 5
+  [[grup.citire]]
+  job = "STATUS_LAUFUNRUHE"
+  valori = { lu1 = "STAT_LUTSFI1_WERT", lu2 = "STAT_LUTSFI2_WERT", lu3 = "STAT_LUTSFI3_WERT", lu4 = "STAT_LUTSFI4_WERT" }
+
+[[marcaj]]
+eticheta = "Cuplez ambreiajul"
+tasta = "1"
+[[marcaj]]
+eticheta = "Simt problema"
+tasta = "2"
+[[marcaj]]
+eticheta = "Accelerez tare"
+tasta = "3"
+
+[[steag]]
+nume = "cadere_la_cuplare"
+tip = "cadere"                # valoarea scade cu cel puțin `cu` în cel mult `in_s`
+camp = "rpm"
+cu = 150
+in_s = 1.5
+conditii = ["pedala < 2", "viteza < 15"]
+[[steag]]
+nume = "tmot_prag"
+tip = "trece_prag"
+camp = "tmot"
+praguri = [40, 60, 80]
+[[steag]]
+nume = "tensiune_mica"
+tip = "sub"
+camp = "ub"
+valoare = 12.0
+timp_s = 3
+```
+
+Alias-urile (`rpm`, `sarcina`...) devin numele coloanelor. Unitățile se iau din rezultatul `..._EINH` la prima citire și se scriu în `coloane.json`.
+
+Profile inițiale de livrat (toate cu cele trei marcaje de mai sus sau adaptate):
+
+1. `eveniment_rapid`: doar grupul „rapid" (MESSWERTE + FASTA2) și LAUFUNRUHE la 5 s. Pentru cuplarea ambreiajului și accelerări, la rece și la cald.
+2. `drum_lung_oras`: aceleași valori + sondele lambda (4 joburi) și FUNKTIONSSTATI la 10 s; `segment_minute = 10`, `erori_interval_minute = 10`. Pentru 30+ minute prin oraș.
+3. `ralanti_incalzire`: MESSWERTE + FASTA2 la fiecare ciclu, LAUFUNRUHE + sonde + FUNKTIONSSTATI + VVT la 10 s, GEMISCH la 60 s; steag `tmot_prag` la 40/60/70/80/90. Pentru pornirea la rece până la cald, mașina pe loc.
+4. `instantaneu_complet`: o singură trecere prin toate joburile utile de la secțiunea 4 (inclusiv identificare și erori, fără AIF în rezumat), apoi se oprește singur. Util la începutul fiecărei zile de test.
+
+## 7. Ciclul de citire
+
+- Un ciclu = rulează grupurile scadente, în ordine, apoi scrie UN rând.
+- Coloanele unui grup lent rămân GOALE în rândurile în care grupul nu a fost citit (nu copia ultima valoare).
+- Fiecare rând are: `t_iso` (ora locală cu milisecunde), `t_rel_s` (secunde de la start, din ceas monoton), `ciclu`, `ciclu_ms` (durata ciclului), coloanele de valori, `marcaj` (text, dacă s-a apăsat în acel ciclu), `steaguri` (listă separată cu `;`).
+- Job eșuat: celulele lui rămân goale, eroarea merge în jurnal și `evenimente.csv`, iar contorul de erori crește. Ciclul continuă.
+- 3 cicluri consecutive fără niciun job reușit → steag `conexiune_pierduta`, `reset()` cu așteptare crescătoare (1 s, 2 s, 5 s, apoi la 5 s). La prima citire reușită → `conexiune_restabilita`.
+- Fără pauze artificiale: ciclul rulează cât de repede permite K-line. Opțional `min_ciclu_ms` în profil.
+- Măsoară și raportează în interfață: cicluri/s, durata medie a fiecărui job.
+
+## 8. Fișierele unei sesiuni
+
+Folder nou: `Documents\bmw-data\sesiuni\<AAAA-LL-ZZ_HHMMSS>_<profil>_<rece|cald|necunoscut>\`
+
+- `sesiune.json`: profilul (copie integrală), condiția (rece/cald), nota scrisă de proprietar la start, versiunea aplicației, ora start/stop, numărul de rânduri, motivul opririi.
+- `date_001.csv`, `date_002.csv`, …: datele, câte un fișier pe segment. Antet cu alias-uri. Separator virgulă, punct zecimal, UTF-8. `flush()` după fiecare rând, `os.fsync()` cel puțin la 5 s. La pornirea unui segment nou, antetul se rescrie.
+- `coloane.json`: alias → job, rezultat, unitate.
+- `evenimente.csv`: `t_iso, t_rel_s, tip (marcaj|steag|eroare|stare), detalii`.
+- `erori_start.json`, `erori_stop.json`, `erori_<t_rel>.json`: rezultatul `FS_LESEN` (și `FS_LESEN_DETAIL` pentru fiecare eroare găsită). La diferență față de start → steag `eroare_noua`.
+- `instantaneu_start.json`: rezultatul joburilor din `instantaneu_la_start`.
+- `jurnal.txt`: tot ce apare în jurnalul din interfață.
+- La Stop (sau oprire neașteptată, prin `atexit` și tratarea Ctrl+C) se închid fișierele corect și se scrie `sesiune.json` final.
+
+## 9. Interfața web (în română)
+
+Aceasta descrie ecranul de ÎNREGISTRARE. Vizualizarea sesiunilor salvate (listă, alegere, afișare în format ușor de citit) e în secțiunea 13.
+
+O singură pagină:
+- Sus: alegere profil (listă din `profiles/`), condiție (rece / cald / necunoscut), câmp de notă, butoane Start și Stop, buton „Citește erorile acum".
+- Panou de stare, actualizat la 1 s: stare (oprit / pornește / înregistrează / reconectare / eroare), profil, timp scurs, rânduri scrise, cicluri/s, „ultima citire reușită acum X s" (VERDE sub 2 s, GALBEN 2–5 s, ROȘU peste 5 s), număr de erori, folderul sesiunii.
+- Ultimele valori: un tabel text simplu alias → valoare → unitate (fără grafice).
+- Butoane de marcaj din profil, cu tastele 1–9 în pagină.
+- Jurnal live: ultimele 200 de linii (start, segmente noi, steaguri, erori, reconectări), cel mai nou sus.
+- Avertisment permanent: „Cât timp înregistrezi, nu folosi serverul MCP din chat."
+
+API (JSON): `GET /api/stare`, `GET /api/jurnal?de_la=N`, `GET /api/profile`, `POST /api/start {profil, conditie, nota}`, `POST /api/stop`, `POST /api/marcaj {eticheta}`, `POST /api/erori`.
+
+`start_logger.bat`: rulează `.venv\Scripts\python.exe -m bmwdiag.webapp` din folderul `bmw-mcp` și deschide `http://127.0.0.1:8765` în browser.
+
+## 10. Etape și criterii de acceptare
+
+Etapa 0 – Fundația
+- `guard.py` cu testele lui (joburi permise și refuzate, inclusiv `STEUERN_*`, `FS_LOESCHEN`, `FLASH_*`, `SET_*`).
+- `ediabas_client.py`: sesiune persistentă, `run(job, filtru, parametri)` cu decodare (`bytes` → text sau `hex:`), detectarea `JOB_STATUS`.
+- `FakeSource` care generează valori plauzibile (turație care scade la „cuplare", temperatură care crește) și `ReplaySource` care redă un CSV.
+- Criteriu: testele trec; `TMODE` funcționează prin `ediabas_client` acasă, fără mașină.
+
+Etapa 1 – Logger în consolă
+- `python -m bmwdiag.recorder --profil eveniment_rapid --sursa fake|ediabas`, cu scrierea completă a folderului de sesiune (secțiunea 8).
+- Criteriu: cu `fake` scrie un CSV corect 2 minute; în mașină (contact pus, motor oprit, apoi pornit) MĂSOARĂ cicluri/s pentru profilul `eveniment_rapid` și scrie rezultatul în `BMW_CONTEXT.md`.
+
+Etapa 2 – Interfața web
+- Toate elementele din secțiunea 9.
+- Criteriu: cu `fake`, Start/Stop/marcaje/jurnal merg din browser; închiderea browserului NU oprește înregistrarea; repornirea paginii arată starea curentă.
+
+Etapa 3 – Profile, steaguri, erori
+- Cele 4 profile din secțiunea 6, motorul de steaguri (`cadere`, `trece_prag`, `sub`, `peste`, `eroare_noua`, `conexiune_*`), citirea erorilor la start/stop/interval/la cerere.
+- Criteriu: cu `fake`, steagul `cadere_la_cuplare` apare la căderea simulată; un profil cu un job refuzat e respins cu mesaj clar.
+
+Etapa 4 – Robustețe pentru drumul lung
+- Segmente, reconectare automată, prevenirea adormirii, blocarea a două instanțe, oprire curată.
+- Criteriu: 30 de minute cu `fake` fără pierderi; cu mașina, scoaterea și reintroducerea cablului produce `conexiune_pierduta` și apoi `conexiune_restabilita`, fără să se oprească sesiunea.
+
+Etapa 5 (opțională) – Rezumat (se face pe `bmwdiag/sesiuni.py`, vezi secțiunea 13)
+- `python -m bmwdiag.rezumat <folder_sesiune>`: durata, min/medie/max pe fiecare coloană, numărul de steaguri pe tip, lista marcajelor cu valorile din ±3 s în jurul lor. Fără biblioteci grele.
+
+Etapele 6–9 (vizualizarea sesiunilor în interfața web): secțiunea 13.
+
+## 11. Analiza datelor
+
+Se face local (notele despre o mașină anume nu sunt în repo). Metoda: sesiuni rece și cald cu aceleași manevre, comparate pe mărimile din profilul `eveniment_rapid`; vezi etapa 9.
+
+## 12. Ce NU faci
+
+- Nu folosi `MSV70`. Nu rula joburi `STEUERN_*`, `*_LOESCHEN`, `*_SCHREIBEN`, `FLASH_*`, `SET_*`, `C_*_SCHREIBEN` etc.
+- Nu instala pachete global și nu folosi `C:\Python314`.
+- Nu modifica `C:\EDIABAS\Bin\*.INI` fără acord.
+- Nu strica `server.py` (îl folosește chatul). Dacă refactorizezi garda, server.py trebuie să importe din `bmwdiag.guard` și să rămână funcțional.
+- Nu pune VIN-ul sau date personale în documentele de proiect (repo-ul e public).
+
+## 13. Vizualizare sesiuni în interfața web (adăugat 02.11.2026)
+
+### 13.1 Problema
+
+O sesiune înseamnă acum un folder cu 8 până la 15 fișiere (`sesiune.json`, `coloane.json`, `date_001.csv`…, `evenimente.csv`, `erori_*.json`, `instantaneu_start.json`, `jurnal.txt`). Proprietarul nu poate citi datele normal: CSV-ul are 30+ coloane cu nume scurte, mii de rânduri (până la ~13.000 la 30 de minute) și multe celule goale (grupurile lente), iar JSON-urile sunt pline de câmpuri tehnice (`_TEL_ANTWORT`, `hex:...`). Vrem o pagină în aplicația existentă unde alegi o sesiune dintr-o listă și o vezi într-un format ușor de citit, în română.
+
+Notă: cerința inițială „FĂRĂ grafice live" (secțiunea 0) rămâne valabilă pentru ecranul de înregistrare. Vizualizarea sesiunilor lucrează pe date SALVATE, deci graficele sunt permise aici.
+
+### 13.2 Ce arată datele reale (verificat pe sesiunile reale)
+
+- Folderul `bmw-data\sesiuni\` conține sesiunile; folderele vechi `<data>_etapa*_...` din `bmw-data` au alt format (fără `sesiune.json`). Nu se afișează în v1.
+- Dimensiuni: de la 1 rând (`instantaneu_complet`, 48 KB) la 13.456 rânduri în 4 segmente (`date_001..004.csv`, ~3,3 MB total). Cel mai mare folder are ~3 MB, deci se poate încărca tot în memorie; nu e nevoie de bază de date.
+- Antetul CSV se repetă în fiecare segment. `ciclu` și `t_rel_s` continuă între segmente.
+- Coloanele grupurilor lente (`lu1..4` la 5 s, sondele, `regl_*` la 10 s) sunt GOALE în majoritatea rândurilor. În tabel rămân goale, în grafic se unesc punctele existente.
+- Valorile au zgomot de virgulă mobilă (`12.151800000000001`): se rotunjesc la afișare (de ex. 4 cifre semnificative), fișierul nu se modifică.
+- `evenimente.csv` are tipurile `stare`, `marcaj`, `steag`, `eroare`. Steagurile au text deja explicativ („rpm a scăzut cu 176.2 (870.8 → 694.5) în 1.32 s").
+- `erori_start.json`, `erori_stop.json`, `erori_<secunde>.json` (ex. `erori_601.json` = la 10 min) au structura `{t_iso, t_rel_s, fs_lesen:{seturi:[...]}, detalii:{"<nr>": {...}}}`. În `seturi` ultimul element e doar telegrama (`JOB_STATUS`, `_TEL_*`); se sare.
+- `instantaneu_start.json` = `{t_iso, joburi:{NUME_JOB:{ok, seturi:[{STAT_X_WERT, STAT_X_EINH, ...}], ...}}}`. Perechile `*_WERT` + `*_EINH` se afișează ca „valoare unitate".
+- Sesiunea poate fi: finalizată, în desfășurare (recorder activ), sau întreruptă brutal (fără `sesiune.json` final, ultimul rând CSV posibil trunchiat). Toate trei trebuie să se deschidă.
+- `AIF_LESEN` conține VIN-ul. În lista curentă de instantaneu nu apare, dar dacă apare într-un profil, câmpurile cu VIN se maschează implicit în afișare.
+
+### 13.3 Cercetare și decizii
+
+1. Server: rămâne biblioteca standard (`ThreadingHTTPServer`), fără pachete noi (constrângerea Python 32-bit din secțiunea 2). Se adaugă rute `GET`, doar citire.
+2. Grafice: se recomandă **uPlot** (MIT, ~50 KB minificat, fără dependențe, desenează ~166.000 de puncte în ~25 ms, suportă zoom, mai multe scale Y, cursor sincronizat între grafice; sursa: github.com/leeoniya/uPlot). Fișierele `uPlot.iife.min.js` și `uPlot.min.css` se pun LOCAL în `bmwdiag/static/vendor/` împreună cu licența, cu versiune fixată. NU se încarcă de pe CDN: laptopul din mașină poate să nu aibă internet. Descărcarea fișierelor e singurul pas cu rețea; dacă nu merge, proprietarul le descarcă manual. Alternativă dacă nu vrem nicio bibliotecă: grafic propriu în SVG/canvas (~200 de linii), mai puțin comod la zoom.
+3. Reducerea punctelor: la 13.000 de rânduri × 6–8 coloane trimiterea completă e ~300 KB, deci în v1 se trimite tot. Dacă o sesiune depășește 30.000 de rânduri, serverul face reducere min/max pe găleți (păstrează extremele; LTTB poate netezi exact căderile scurte de turație pe care le căutăm, deci NU se folosește), iar la zoom clientul cere detaliul intervalului.
+4. Citire și cache: modul nou `bmwdiag/sesiuni.py` (fără dependențe de EDIABAS), refolosit și de `rezumat` din Etapa 5. Citește cu `csv`, tolerează ultimul rând trunchiat, concatenează segmentele, cache în memorie (3 sesiuni, cheie = folder + mtime-urile fișierelor). Pentru sesiunea activă nu se face cache.
+5. Siguranță: id-ul sesiunii trebuie să se potrivească cu `^\d{4}-\d{2}-\d{2}_\d{6}_[\w-]+$` și calea rezolvată trebuie să rămână în `bmw-data\sesiuni`; descărcările brute doar dintr-o listă albă de nume de fișier (`sesiune.json`, `coloane.json`, `date_NNN.csv`, `evenimente.csv`, `erori_*.json`, `instantaneu_start.json`, `jurnal.txt`). Fără scriere, fără ștergere din interfață. Serverul rămâne pe `127.0.0.1`.
+6. Vizualizarea nu atinge EDIABAS, deci poate fi folosită și în timpul unei înregistrări (și pentru sesiunea care încă rulează, cu reîmprospătare manuală).
+
+### 13.4 Interfața (în română)
+
+Navigare sus în pagină: „Înregistrare" (pagina actuală) și „Sesiuni". Rută: `/sesiuni.html#<id>` (aceeași pagină, lista și detaliul pe hash, ca să meargă butonul Înapoi).
+
+**Lista sesiunilor** (cea mai nouă prima), tabel cu: data și ora start, profil, condiție (insignă rece/cald/necunoscut), durată, rânduri, cicluri/s, numărul de steaguri (pe tip, la hover), prima parte din notă, motivul opririi, insignă „în desfășurare" sau „întreruptă". Filtre: condiție, profil, text în notă. Sortare după dată. Click pe rând = deschide sesiunea.
+
+**Detaliul sesiunii**, cu file:
+
+1. **Rezumat**: profil, condiție, notă, start/stop, durată, rânduri, segmente, cicluri/s, motiv oprire; temperatura motorului la început și la sfârșit; steaguri pe tip; tabel „min / medie / max" pe fiecare mărime (cu denumire română și unitate); tabel de joburi (apeluri, erori, ms mediu); avertisment dacă au fost erori de citire sau `conexiune_pierduta`.
+2. **Grafice**: presetări în română: „Turație" (`rpm`, `rpm_tinta`, `pedala`), „Temperaturi" (`tmot`, `taer`), „Sarcină și cuplu" (`sarcina`, `sarcina_tinta`, `cuplu`, `maf`, `clapeta`), „Amestec" (`fr1`, `fr2`, `te`, `te2`), „Came și avans", „Neregularitate cilindri" (`lu1..4`), „Sonde lambda", „Baterie". Alegere liberă de coloane. Zoom cu mouse, dublu-click = reset, cursor sincronizat între grafice, valorile de sub cursor afișate în legendă. Evenimentele (marcaje, steaguri, erori noi) apar ca linii verticale colorate pe axa timpului. Axa timpului comutabilă între „secunde de la start" și ora locală.
+3. **Evenimente**: lista din `evenimente.csv`, cu filtru pe tip. Click pe un eveniment = sare în grafice la fereastra de ±5 s și afișează un mic tabel „înainte / minim / după" pentru `rpm`, `sarcina`, `pedala`, `clapeta`, `tmot` (exact ce trebuie pentru „cade turația la cuplare").
+4. **Tabel**: toate rândurile, cu antetul fix, coloane cu denumiri românești (numele scurt în dreapta, la hover), virtualizat (se desenează doar rândurile vizibile), filtru pe interval de timp, „doar rândurile cu marcaj sau steag", grupuri de coloane care se pot ascunde. Valori rotunjite. Celule goale = grup lent necitit în acel ciclu.
+5. **Erori**: pentru start, stop și fiecare citire de interval: lista erorilor (număr, text, simptom, stare „bisher nicht aufgetreten", condițiile de mediu: km, turație, temperatura motorului etc. din `detalii`), cu evidențierea celor noi față de start.
+6. **Instantaneu la start**: câte o carte pe job (IDENT, ZIF, GEMISCH, FUNKTIONSSTATI, sonde...), cu tabel „mărime — valoare unitate". Câmpurile tehnice (`_TEL_*`, `hex:`, `JOB_STATUS`) ascunse sub „Arată detalii tehnice". Câmpurile cu VIN mascate, buton „Arată".
+7. **Jurnal**: `jurnal.txt` ca text, cu căutare.
+8. **Fișiere**: lista fișierelor din folder cu dimensiune și link de descărcare (cele din lista albă), plus calea folderului pentru copiere.
+
+Dicționar de denumiri: fișier `bmwdiag/static/nume_ro.json` cu `alias → {eticheta, unitate_afisata, grup}` pentru coloanele din profile (de ex. `rpm` → „Turație", `sarcina` → „Sarcina motorului (umplere)", `fr1` → „Factor lambda banca 1") și `STAT_*` → etichetă pentru instantaneu, luate din secțiunea 4. Ce nu e în dicționar se afișează cu numele brut, fără eroare. Unitățile vin din `coloane.json`, nu se dublează.
+
+### 13.5 API (doar GET, JSON)
+
+- `GET /api/sesiuni` → lista (câmpurile din tabelul de listă; calculate din `sesiune.json`; dacă lipsește, din CSV și din `evenimente.csv`).
+- `GET /api/sesiuni/<id>` → `sesiune.json` fără `profil_toml`, `coloane.json`, rezumat calculat (min/medie/max), evenimente, erori (parsate, fără câmpuri tehnice), instantaneu (parsat), starea („finalizată" / „în desfășurare" / „întreruptă").
+- `GET /api/sesiuni/<id>/date?coloane=rpm,tmot&de_la=<s>&pana_la=<s>&max=<n>` → format pe coloane: `{"t":[...], "rpm":[...], "tmot":[...]}` cu `null` pentru celulele goale; `max` activează reducerea min/max.
+- `GET /api/sesiuni/<id>/rand?t=<s>` → rândul cel mai apropiat de momentul `t` (pentru cardul „la acest moment").
+- `GET /api/sesiuni/<id>/fisier/<nume>` → descărcare din lista albă.
+- `GET /api/sesiuni/<id>/jurnal` → text.
+- Ruta statică nouă: `/sesiuni.html`, `/sesiuni.js`, `/vendor/*` (doar fișierele cunoscute, la fel ca `FISIERE_STATICE`).
+
+### 13.6 Etape și criterii de acceptare
+
+Etapa 6 – Citirea și API-ul (fără interfață)
+- `bmwdiag/sesiuni.py`: `lista()`, `incarca(id)`, `date(id, coloane, ...)`, `rezumat(id)`.
+- Teste în `tests/test_sesiuni.py`: sesiune generată cu `FakeSource` (un segment și mai multe), `sesiune.json` lipsă, ultimul rând CSV trunchiat, sesiune cu un singur rând, id-uri ostile (`..\..`, `x/../y`, nume cu `:`) → 400/404, fișier în afara listei albe → 404, celule goale → `null`.
+- Test de fum pe datele reale din `bmw-data\sesiuni`, sărit automat dacă folderul lipsește.
+- Criteriu: toate sesiunile reale se încarcă; o sesiune de ~13.500 de rânduri; răspunsul la `/api/sesiuni/<id>/date` pentru 6 coloane sub 500 KB și sub 200 ms în afara primei citiri.
+
+Etapa 7 – Pagina „Sesiuni": listă, rezumat, evenimente, erori, instantaneu, jurnal, fișiere (fără grafice)
+- Criteriu: se poate alege oricare din cele 9 sesiuni, iar proprietarul vede în română durata, steagurile, marcajele, erorile și instantaneul fără să deschidă un fișier. Merge cu Înapoi/Înainte și cu reîncărcarea paginii. Cu o înregistrare activă, lista arată sesiunea ca „în desfășurare".
+
+Etapa 8 – Grafice și tabel
+- uPlot local (`static/vendor/`, licența inclusă), presetările din 13.4, linii verticale pentru evenimente, zoom, sincronizare cursor, tabelul virtualizat.
+- Criteriu: sesiunea de 13.456 de rânduri se afișează fluid (fără blocarea paginii) iar căderea de turație de la un steag `cadere_la_cuplare` se vede clar când dai click pe eveniment. Pagina funcționează fără internet.
+
+Etapa 9 (opțională) – Comparare rece / cald
+- Alegi două sesiuni și le suprapui pe același grafic, aliniate la un eveniment ales din fiecare (de ex. primul „Cuplez ambreiajul" sau un steag `cadere_la_cuplare`), cu t = 0 la eveniment și fereastră de ±5 s. Tabel „cădere de turație, sarcină, cuplu, clapetă" la fiecare cuplare, rece vs cald. Aceasta e legătura directă cu scopul din secțiunea 11.
+
+Etapa 5 (rezumat în consolă) se face pe `bmwdiag/sesiuni.py`, nu separat, ca să nu existe două implementări.
+
+### 13.7 Reguli pentru implementare
+
+- Nu se modifică fișierele unei sesiuni existente. Vizualizarea e strict de citire.
+- Nu se schimbă formatul fișierelor scrise de `recorder.py` fără acord; dacă lipsește ceva util (de ex. `t_iso` în `sesiune.json` pentru fiecare segment), se notează aici și se întreabă.
+- Fără pachete noi Python. Singurul activ extern: uPlot, local, versiune fixată.
+- Textele din interfață în română. Date în formatul `ZZ.LL.AAAA HH:MM`.
+- După fiecare etapă: actualizează `BMW_CONTEXT.md` (de ex. dimensiunile reale, timpii de încărcare) și rulează testele existente (nu strica `server.py` și înregistrarea).
+
+### 13.8 Întrebări deschise (decide proprietarul; până atunci se aplică valoarea implicită)
+
+1. Graficele în v1: da (implicit) sau doar tabele?
+2. Comparația rece/cald (Etapa 9): se face după ce merge vizualizarea unei sesiuni (implicit).
+3. Notă ulterioară pe o sesiune (de ex. „aici am apăsat gazul în podea"): în v1 nu; dacă se vrea, se salvează într-un fișier separat `note_ulterioare.txt`, fără a atinge `sesiune.json`.
+4. Folderele vechi `<data>_etapa*` din `bmw-data`: nu se afișează în v1.

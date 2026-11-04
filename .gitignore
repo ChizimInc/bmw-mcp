@@ -6,14 +6,13 @@ __pycache__/
 
 # date de la masina (raman in afara repo-ului)
 bmw-data/
-sesiuni/
+/sesiuni/
+/*.csv
 logger.lock
-*.csv
 
-# documente interne (context despre masina concreta, cai locale)
-BMW_CONTEXT.md
-CLAUDE.md
-PLAN_LOGGER.md
+# note locale despre masina concreta (nu se publica; repo-ul e public)
+local/
+CLAUDE.local.md
 
 # editor / sistem
 .vscode/

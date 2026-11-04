@@ -7,6 +7,8 @@ Instrumente de diagnostic BMW (EDIABAS, motor N46 / calculator Bosch MEV9) în P
 
 Interfața și mesajele sunt în limba română.
 
+Documentație: `docs/SPECIFICATIE.md` (arhitectură, formatul sesiunilor, API, etape) și `docs/JOBURI_MEV9N46L.md` (joburi EDIABAS verificate). Regulile de lucru pentru Claude Code sunt în `CLAUDE.md`.
+
 ## Avertisment
 
 Proiectul e făcut pentru **citire**. Garda din `bmwdiag/guard.py` și `server.py` permite doar joburi de tip `STATUS_*`, `*_LESEN`, `IDENT`, `INFO`, `LESE_*` și refuză orice conține `LOESCH`, `SCHREIB`, `STEUERN`, `FLASH`, `PROGRAM`, `RESET`, `SET_`, `WRITE`, `ERASE`, `DELETE`. Nu slăbi garda: o scriere greșită într-un calculator poate strica mașina. Folosești codul pe propria răspundere (vezi licența).
