@@ -309,6 +309,16 @@ Etapa 8 – Grafice și tabel
 - uPlot local (`static/vendor/`, licența inclusă), presetările din 13.4, linii verticale pentru evenimente, zoom, sincronizare cursor, tabelul virtualizat.
 - Criteriu: sesiunea de 13.456 de rânduri se afișează fluid (fără blocarea paginii) iar căderea de turație de la un steag `cadere_la_cuplare` se vede clar când dai click pe eveniment. Pagina funcționează fără internet.
 
+- Realizat (04.11.2026). Fișiere: `static/sesiuni_date.js` (grafice + tabel, se încarcă înaintea lui `sesiuni.js`), `static/vendor/` (uPlot 1.6.31, `LICENSE-uPlot.txt`, `VERSIUNE.txt`), rute statice `/sesiuni_date.js` și `/vendor/{uPlot.iife.min.js,uPlot.min.css,LICENSE-uPlot.txt}`. Detalii:
+  - Filele noi: „Grafice” (după Rezumat) și „Tabel” (după Evenimente). Presetările din 13.4 plus „Viteză”; „Grafic liber” cu până la 8 coloane. O axă Y pe unitate (`% pedală`, `% clapetă` și `%` împart axa „%”).
+  - Vederea de ansamblu cere `/date?...&max=5000`; la zoom (și după 220 ms) fiecare grafic cere detaliul ferestrei (+25% margine, `max=3000`). Zoom-ul și cursorul sunt sincronizate între grafice; dublu-click sau „Vedere de ansamblu” resetează; butoanele −, +, ←, → ajută pe telefon. Valoarea nulă din legendă arată ultima valoare citită, cu „~”.
+  - Linii verticale: marcaje (verde, întrerupt), steaguri (galben), erori noi (roșu, întrerupt); evenimentul ales e accentuat. Hover lângă linie afișează textul evenimentului.
+  - Evenimente: buton „Vezi în grafice” (și click pe rând) → fereastra ±5 s și tabelul „înainte (t−3 s) / minim (cu momentul) / după (t+3 s) / minim − înainte” pentru rpm, sarcină, pedală, clapetă, tmot.
+  - Tabel: rânduri desenate doar pe cele vizibile (~25–40 în DOM), antet și primele două coloane fixe, filtru de interval (secunde sau m:ss), „doar rândurile cu marcaj sau steag” (verde/galben), grupuri de coloane ascunse din „Grupuri de coloane afișate”.
+  - API: `/date` acceptă acum și coloanele text `marcaj`, `steaguri`, `t_iso` (la reducere nu intră în calculul extremelor).
+  - Ora locală pe axă: decalajul se ia din `/rand?t=0`.
+  - Temă deschisă/închisă prin variabilele `--serie-N` și `--ev-*` din `style.css`; graficele se reconstruiesc la schimbarea temei.
+
 Etapa 9 (opțională) – Comparare rece / cald
 - Alegi două sesiuni și le suprapui pe același grafic, aliniate la un eveniment ales din fiecare (de ex. primul „Cuplez ambreiajul" sau un steag `cadere_la_cuplare`), cu t = 0 la eveniment și fereastră de ±5 s. Tabel „cădere de turație, sarcină, cuplu, clapetă" la fiecare cuplare, rece vs cald. Aceasta e legătura directă cu scopul din secțiunea 11.
 

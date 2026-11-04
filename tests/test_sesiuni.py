@@ -75,6 +75,13 @@ class TestSesiuni(unittest.TestCase):
         self.assertEqual(max(v for v in red["rpm"]), max(tot["rpm"]))  # extremele se pastreaza
         self.assertEqual(min(v for v in red["rpm"]), min(tot["rpm"]))
 
+    def test_coloane_text_si_reducere(self):
+        d = sesiuni.date(self.id1, ["rpm", "marcaj", "steaguri", "t_iso"], **self.kw())
+        self.assertEqual(len(d["marcaj"]), len(d["t"]))
+        self.assertTrue(all(isinstance(x, str) for x in d["marcaj"] + d["steaguri"] + d["t_iso"]))
+        red = sesiuni.date(self.id1, ["rpm", "marcaj"], max_puncte=6, **self.kw())  # nu cade pe siruri
+        self.assertEqual(len(red["marcaj"]), len(red["t"]))
+
     def test_rand_cel_mai_apropiat(self):
         tot = sesiuni.date(self.id1, ["rpm"], **self.kw())
         r = sesiuni.rand(self.id1, tot["t"][3] + 0.0001, **self.kw())

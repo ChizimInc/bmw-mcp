@@ -61,6 +61,31 @@ class TestWebapp(unittest.TestCase):
         self.assertEqual(self.cere("/../server.py")[0], 404)
         self.assertEqual(self.cere("/nu_exista")[0], 404)
 
+    def test_vendor_uplot_local_si_doar_fisierele_cunoscute(self):
+        cod, corp, tip = self.cere("/vendor/uPlot.iife.min.js")
+        self.assertEqual(cod, 200)
+        self.assertIn("javascript", tip)
+        self.assertIn(b"uPlot", corp)
+        cod, corp, tip = self.cere("/vendor/uPlot.min.css")
+        self.assertEqual((cod, "text/css" in tip), (200, True))
+        cod, corp, _ = self.cere("/vendor/LICENSE-uPlot.txt")
+        self.assertEqual(cod, 200)
+        self.assertIn(b"MIT", corp)
+        for rau in ("/vendor/", "/vendor/VERSIUNE.txt", "/vendor/../app.js", "/vendor/%2e%2e/server.py",
+                    "/vendor/uPlot.iife.min.js/..", "/vendor/nu_exista.js"):
+            self.assertEqual(self.cere(rau)[0], 404, rau)
+
+    def test_pagina_sesiuni_fara_cdn(self):
+        cod, corp, _ = self.cere("/sesiuni.html")
+        self.assertEqual(cod, 200)
+        text = corp.decode("utf-8")
+        self.assertNotIn("http://", text)
+        self.assertNotIn("https://", text)
+        for f in ("/sesiuni_date.js", "/sesiuni.js", "/nume_ro.json"):
+            self.assertEqual(self.cere(f)[0], 200, f)
+        for f in ("vendor/uPlot.iife.min.js", "vendor/uPlot.min.css", "sesiuni_date.js"):
+            self.assertIn(f, text)
+
     def test_profile_valide_si_invalide(self):
         cod, lista = self.j("/api/profile")
         self.assertEqual(cod, 200)

@@ -26,7 +26,11 @@ FISIERE_STATICE = {"/": ("index.html", "text/html"), "/index.html": ("index.html
                    "/app.js": ("app.js", "application/javascript"), "/style.css": ("style.css", "text/css"),
                    "/sesiuni.html": ("sesiuni.html", "text/html"),
                    "/sesiuni.js": ("sesiuni.js", "application/javascript"),
-                   "/nume_ro.json": ("nume_ro.json", "application/json")}
+                   "/sesiuni_date.js": ("sesiuni_date.js", "application/javascript"),
+                   "/nume_ro.json": ("nume_ro.json", "application/json"),
+                   "/vendor/uPlot.iife.min.js": ("vendor/uPlot.iife.min.js", "application/javascript"),
+                   "/vendor/uPlot.min.css": ("vendor/uPlot.min.css", "text/css"),
+                   "/vendor/LICENSE-uPlot.txt": ("vendor/LICENSE-uPlot.txt", "text/plain")}
 AVERTISMENT_MCP = "Cât timp înregistrezi, nu folosi serverul MCP din chat."
 
 

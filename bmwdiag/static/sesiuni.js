@@ -1,9 +1,10 @@
-// Pagina „Sesiuni”: listă și detaliu, pe hash (#<id> sau #<id>/<tab>). Doar citire, fără grafice (Etapa 8).
+// Pagina „Sesiuni”: listă și detaliu, pe hash (#<id> sau #<id>/<tab>). Doar citire.
+// Graficele și tabelul virtualizat sunt în sesiuni_date.js (se încarcă înaintea acestui fișier).
 "use strict";
 
 const $ = (id) => document.getElementById(id);
 const FILE = [
-  ["rezumat", "Rezumat"], ["evenimente", "Evenimente"], ["erori", "Erori"],
+  ["rezumat", "Rezumat"], ["grafice", "Grafice"], ["evenimente", "Evenimente"], ["tabel", "Tabel"], ["erori", "Erori"],
   ["instantaneu", "Instantaneu la start"], ["jurnal", "Jurnal"], ["fisiere", "Fișiere"],
 ];
 const RE_VIN = /^[A-HJ-NPR-Z0-9]{17}$/;
@@ -242,9 +243,10 @@ function alegeTab(k) {
 function deseneazaTab() {
   const c = $("continut-tab");
   c.setAttribute("aria-labelledby", "tab-" + tabCurent);
+  curataGrafice();
   c.innerHTML = "";
-  const f = { rezumat: tabRezumat, evenimente: tabEvenimente, erori: tabErori, instantaneu: tabInstantaneu,
-    jurnal: tabJurnal, fisiere: tabFisiere }[tabCurent];
+  const f = { rezumat: tabRezumat, grafice: tabGrafice, evenimente: tabEvenimente, tabel: tabTabel, erori: tabErori,
+    instantaneu: tabInstantaneu, jurnal: tabJurnal, fisiere: tabFisiere }[tabCurent];
   c.append(...[].concat(f(detaliu.date)));
 }
 
@@ -332,20 +334,24 @@ function tabEvenimente(d) {
     el("p", { class: "mic", id: "numar-ev", role: "status" }),
     el("div", { class: "derulare" }, el("table", { class: "tabel" },
       el("thead", {}, el("tr", {}, el("th", { class: "nr", text: "Timp" }), el("th", { text: "Ora" }),
-        el("th", { text: "Tip" }), el("th", { text: "Detalii" }))), corp))];
+        el("th", { text: "Tip" }), el("th", { text: "Detalii" }), el("th", { text: "Grafic" }))), corp))];
   function umpleEv() {
     corp.innerHTML = "";
     const v = ev.filter((e) => !filtruEv || e.tip === filtruEv);
     for (const e of v) {
       const clasa = { steag: "galben", eroare: "rosu", marcaj: "verde" }[e.tip] || "";
-      corp.append(el("tr", {}, el("td", { class: "nr fara-rupere", title: `${nr(e.t_rel_s)} s`, text: minSec(e.t_rel_s) }),
+      const poate = typeof e.t_rel_s === "number";
+      corp.append(el("tr", { class: poate ? "ev-rand" : null, onclick: poate ? (ev) => { if (!ev.target.closest("button")) sariLaEveniment(e); } : null },
+        el("td", { class: "nr fara-rupere", title: `${nr(e.t_rel_s)} s`, text: minSec(e.t_rel_s) }),
         el("td", { class: "fara-rupere", text: oraRo(e.t_iso) }),
         el("td", {}, el("span", { class: "eticheta " + clasa, text: e.tip })),
-        el("td", { text: e.detalii })));
+        el("td", { text: e.detalii }),
+        el("td", {}, poate ? el("button", { type: "button", class: "mic-buton", text: "Vezi în grafice",
+          title: `Deschide graficele la fereastra de ±${FEREASTRA_EV_S} s în jurul evenimentului`, onclick: () => sariLaEveniment(e) }) : null)));
     }
-    if (!v.length) corp.append(el("tr", {}, el("td", { colspan: 4, class: "gol", text: "Niciun eveniment." })));
+    if (!v.length) corp.append(el("tr", {}, el("td", { colspan: 5, class: "gol", text: "Niciun eveniment." })));
     const n = document.getElementById("numar-ev");
-    if (n) n.textContent = `${v.length} evenimente. „Timp” = minute:secunde de la start.`;
+    if (n) n.textContent = `${v.length} evenimente. „Timp” = minute:secunde de la start. Click pe un eveniment = îl arată în grafice (±${FEREASTRA_EV_S} s).`;
   }
   queueMicrotask(umpleEv);
   return radacina;
@@ -531,6 +537,7 @@ function ruta() {
   if (!id) {
     $("vedere-detaliu").hidden = true;
     $("vedere-lista").hidden = false;
+    curataGrafice();
     document.title = "Sesiuni – Logger BMW E90";
     detaliu = null;
     incarcaLista();

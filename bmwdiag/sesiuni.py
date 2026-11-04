@@ -286,7 +286,7 @@ def incarca(id_: str, dir_date=DIR_DATE, folder_activ=None) -> dict:
                         for p in sorted(f.iterdir()) if p.is_file()]}
 
 
-def _reduce(t: list, serii: dict, max_puncte: int):
+def _reduce(t: list, serii: dict, max_puncte: int, ignora=()):
     """Reducere min/max pe galeti: pastreaza extremele fiecarei serii (nu netezeste caderile scurte)."""
     n = len(t)
     if not max_puncte or n <= max_puncte:
@@ -297,7 +297,9 @@ def _reduce(t: list, serii: dict, max_puncte: int):
     for g in range(galeti):
         a, b = int(g * pas), min(n, int((g + 1) * pas))
         indici.add(a)
-        for vals in serii.values():
+        for c, vals in serii.items():
+            if c in ignora:  # coloanele text nu au extreme
+                continue
             v = [(vals[i], i) for i in range(a, b) if vals[i] is not None]
             if v:
                 indici.add(min(v)[1])
@@ -308,17 +310,18 @@ def _reduce(t: list, serii: dict, max_puncte: int):
 
 def date(id_: str, coloane: list[str], de_la: float | None = None, pana_la: float | None = None,
          max_puncte: int = 0, dir_date=DIR_DATE, folder_activ=None) -> dict:
-    """{"t": [...], "<coloana>": [...]} cu None pentru celulele goale. Coloana necunoscuta -> IdInvalid."""
+    """{"t": [...], "<coloana>": [...]} cu None pentru celulele goale. Coloana necunoscuta -> IdInvalid.
+    Pe langa coloanele numerice se pot cere si cele text: t_iso, marcaj, steaguri (sir gol = fara)."""
     f = folder_sesiune(id_, dir_date)
     d = _incarca_date(f, _este_activ(f, folder_activ))
     for c in coloane:
-        if c not in d.coloane:
+        if c not in d.coloane and c not in d.text:
             raise IdInvalid(f"Coloană necunoscută: {c!r}")
     a = bisect.bisect_left(d.t, de_la) if de_la is not None else 0
     b = bisect.bisect_right(d.t, pana_la) if pana_la is not None else len(d.t)
     t = d.t[a:b]
-    serii = {c: d.coloane[c][a:b] for c in coloane}
-    t, serii = _reduce(t, serii, max_puncte)
+    serii = {c: (d.text[c] if c in d.text else d.coloane[c])[a:b] for c in coloane}
+    t, serii = _reduce(t, serii, max_puncte, ignora=tuple(d.text))
     return {"t": t, **serii}
 
 

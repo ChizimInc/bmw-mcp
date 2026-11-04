@@ -1,0 +1,1 @@
+uPlot 1.6.31 (MIT), descarcat de la https://cdn.jsdelivr.net/npm/uplot@1.6.31/dist/ . Local, fara CDN la rulare.
