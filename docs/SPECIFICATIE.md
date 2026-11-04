@@ -319,8 +319,15 @@ Etapa 8 – Grafice și tabel
   - Ora locală pe axă: decalajul se ia din `/rand?t=0`.
   - Temă deschisă/închisă prin variabilele `--serie-N` și `--ev-*` din `style.css`; graficele se reconstruiesc la schimbarea temei.
 
-Etapa 9 (opțională) – Comparare rece / cald
+Etapa 9 – Comparare rece / cald
 - Alegi două sesiuni și le suprapui pe același grafic, aliniate la un eveniment ales din fiecare (de ex. primul „Cuplez ambreiajul" sau un steag `cadere_la_cuplare`), cu t = 0 la eveniment și fereastră de ±5 s. Tabel „cădere de turație, sarcină, cuplu, clapetă" la fiecare cuplare, rece vs cald. Aceasta e legătura directă cu scopul din secțiunea 11.
+
+- Realizat (04.11.2026). Pagină separată `/comparare.html` (navigare „Înregistrare / Sesiuni / Comparare” în toate paginile), `static/comparare.js`, rute statice `/comparare.html` și `/comparare.js`. Fără endpoint nou: pentru fiecare sesiune se citesc `/api/sesiuni/<id>` (evenimente) și `/date` cu 11 coloane complete (rpm, sarcină, cuplu, clapetă, pedală, tmot, viteză, maf, avans, sarcina_tinta, rpm_tinta), iar fereastra și tabelul se calculează în browser. Detalii:
+  - Alegeri: sesiunea A și B, tipul de eveniment comparat (steag după nume, marcaj după text, erori noi, „toate”) și evenimentul de aliniere din fiecare sesiune (implicit primul cu motorul deja pornit). Implicit: cea mai mare sesiune rece ca A și cea mai mare caldă ca B.
+  - Grafic: un grafic uPlot pe mărime (bife), serii „A: rece 13:53” și „B: cald 15:05”, axa x = secunde față de eveniment, fereastră ±3 / 5 / 10 / 20 s, linie la t = 0 și la ±3 s (momentele „înainte” și „după”), zoom cu mouse (sincronizat), dublu-click sau „Fereastra întreagă” = reset, legendă cu valori sub cursor.
+  - Tabel: „Rezumat pe sesiune” (înainte / minim medii, cădere medie și mediană, B − A) și câte un tabel pe sesiune cu înainte / minim / după / cădere pentru rpm, sarcină, cuplu, clapetă la fiecare eveniment; click pe rând = aliniază graficul la acel eveniment. Definiții: înainte = t−3 s, după = t+3 s, minim în [t−3, t+3], cădere = înainte − minim.
+  - Starea e în hash (`#a=&b=&c=&ea=&eb=&m=&w=`): schimbarea sesiunii creează intrare în istoric (Înapoi/Înainte), restul folosește `replaceState`; reîncărcarea păstrează totul. Fără internet, fără scriere.
+  - Test: `test_pagina_comparare_fara_cdn_si_navigare` în `tests/test_webapp.py`.
 
 Etapa 5 (rezumat în consolă) se face pe `bmwdiag/sesiuni.py`, nu separat, ca să nu existe două implementări.
 

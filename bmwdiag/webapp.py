@@ -27,6 +27,8 @@ FISIERE_STATICE = {"/": ("index.html", "text/html"), "/index.html": ("index.html
                    "/sesiuni.html": ("sesiuni.html", "text/html"),
                    "/sesiuni.js": ("sesiuni.js", "application/javascript"),
                    "/sesiuni_date.js": ("sesiuni_date.js", "application/javascript"),
+                   "/comparare.html": ("comparare.html", "text/html"),
+                   "/comparare.js": ("comparare.js", "application/javascript"),
                    "/nume_ro.json": ("nume_ro.json", "application/json"),
                    "/vendor/uPlot.iife.min.js": ("vendor/uPlot.iife.min.js", "application/javascript"),
                    "/vendor/uPlot.min.css": ("vendor/uPlot.min.css", "text/css"),

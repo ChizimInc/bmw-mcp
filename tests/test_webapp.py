@@ -86,6 +86,25 @@ class TestWebapp(unittest.TestCase):
         for f in ("vendor/uPlot.iife.min.js", "vendor/uPlot.min.css", "sesiuni_date.js"):
             self.assertIn(f, text)
 
+    def test_pagina_comparare_fara_cdn_si_navigare(self):
+        cod, corp, tip = self.cere("/comparare.html")
+        self.assertEqual(cod, 200)
+        self.assertIn("text/html", tip)
+        html = corp.decode("utf-8")
+        self.assertNotIn("http://", html)
+        self.assertNotIn("https://", html)
+        for f in ("vendor/uPlot.iife.min.js", "vendor/uPlot.min.css", "comparare.js"):
+            self.assertIn(f, html)
+        cod, js, tip = self.cere("/comparare.js")
+        self.assertEqual(cod, 200)
+        self.assertIn("application/javascript", tip)
+        text = js.decode("utf-8")
+        self.assertNotIn("https://", text)
+        for metoda in ("POST", "PUT", "DELETE"):  # doar citire: niciun apel de scriere din pagina
+            self.assertNotIn(f"method: \"{metoda}\"", text)
+        for pagina in ("/", "/sesiuni.html", "/comparare.html"):
+            self.assertIn('href="/comparare.html"', self.cere(pagina)[1].decode("utf-8"), pagina)
+
     def test_profile_valide_si_invalide(self):
         cod, lista = self.j("/api/profile")
         self.assertEqual(cod, 200)
