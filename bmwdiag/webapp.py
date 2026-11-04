@@ -14,9 +14,9 @@ from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
-from . import __version__, profiles, sistem
+from . import __version__, profiles, sesiuni, sistem
 from .ediabas_client import ECU_IMPLICIT
 from .jurnal import Jurnal
 from .recorder import CONDITII, DIR_DATE, Recorder, _json, citeste_erori, creeaza_sursa
@@ -146,8 +146,8 @@ def fa_handler(app: Aplicatie):
             self.wfile.write(corp)
 
         def _json(self, cod: int, obiect):
-            self._trimite(cod, json.dumps(obiect, ensure_ascii=False, default=str).encode("utf-8"),
-                          "application/json")
+            self._trimite(cod, json.dumps(obiect, ensure_ascii=False, default=str, separators=(",", ":"))
+                          .encode("utf-8"), "application/json")
 
         def _corp(self) -> dict:
             n = int(self.headers.get("Content-Length") or 0)
@@ -172,10 +172,50 @@ def fa_handler(app: Aplicatie):
                 return self._json(200, {"linii": linii, "ultimul": linii[-1][0] if linii else de_la})
             if u.path == "/api/profile":
                 return self._json(200, app.profile())
+            if u.path == "/api/sesiuni" or u.path.startswith("/api/sesiuni/"):
+                return self._sesiuni(u)
             if u.path in FISIERE_STATICE:
                 nume, tip = FISIERE_STATICE[u.path]
                 return self._trimite(200, (DIR_STATIC / nume).read_bytes(), tip)
             self._json(404, {"eroare": "nu există"})
+
+        def _sesiuni(self, u):
+            """Rute doar-citire pentru sesiunile salvate; nu ating EDIABAS."""
+            parti = [unquote(p) for p in u.path.split("/")[3:]]
+            q = parse_qs(u.query)
+            activ = app.recorder.folder if app.activ else None
+            kw = {"dir_date": app.dir_date}
+            try:
+                if not parti:
+                    return self._json(200, sesiuni.lista(folder_activ=activ, **kw))
+                id_, ce = parti[0], parti[1] if len(parti) > 1 else None
+                if ce is None:
+                    return self._json(200, sesiuni.incarca(id_, folder_activ=activ, **kw))
+                if ce == "date":
+                    cols = [c for c in q.get("coloane", [""])[0].split(",") if c]
+                    nr = lambda k: float(q[k][0]) if k in q else None  # noqa: E731
+                    try:
+                        de_la, pana_la, mx = nr("de_la"), nr("pana_la"), int(q.get("max", ["0"])[0])
+                    except ValueError:
+                        return self._json(400, {"eroare": "Parametri numerici invalizi."})
+                    return self._json(200, sesiuni.date(id_, cols, de_la, pana_la, mx, folder_activ=activ, **kw))
+                if ce == "rand":
+                    try:
+                        t = float(q.get("t", [""])[0])
+                    except ValueError:
+                        return self._json(400, {"eroare": "Lipsește t (secunde)."})
+                    return self._json(200, sesiuni.rand(id_, t, folder_activ=activ, **kw))
+                if ce == "jurnal":
+                    return self._trimite(200, sesiuni.jurnal(id_, **kw).encode("utf-8"), "text/plain")
+                if ce == "fisier" and len(parti) == 3:
+                    p = sesiuni.fisier(id_, parti[2], **kw)
+                    tip = "application/json" if p.suffix == ".json" else "text/plain"
+                    return self._trimite(200, p.read_bytes(), tip)
+                return self._json(404, {"eroare": "nu există"})
+            except sesiuni.IdInvalid as e:
+                return self._json(400, {"eroare": str(e)})
+            except sesiuni.NuExista as e:
+                return self._json(404, {"eroare": str(e)})
 
         def do_POST(self):
             u = urlparse(self.path)
