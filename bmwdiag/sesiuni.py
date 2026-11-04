@@ -205,6 +205,61 @@ def lista(dir_date=DIR_DATE, folder_activ=None) -> list[dict]:
     return rez
 
 
+def info(id_: str, dir_date=DIR_DATE, folder_activ=None) -> dict:
+    """Aceleasi campuri ca un rand din lista() (durata, randuri, cicluri/s, steaguri pe tip, stare...), pentru o sesiune."""
+    return _fa_rezumat_lista(folder_sesiune(id_, dir_date), folder_activ)
+
+
+# Fereastra din jurul unui eveniment (aceleasi definitii ca masoara() din static/comparare.js)
+DT_INAINTE, DT_DUPA, TOL_VALOARE = 3.0, 3.0, 1.5
+
+
+def _valoare_la(t: list, v: list, tc: float, tol: float):
+    """Valoarea nenula cea mai apropiata de tc, in +-tol secunde (la egalitate, cea de dinainte)."""
+    lo = bisect.bisect_left(t, tc)
+    cel, dist = None, tol + 1e-9
+    k = lo - 1
+    while k >= 0 and tc - t[k] <= tol:
+        if v[k] is not None:
+            cel, dist = v[k], tc - t[k]
+            break
+        k -= 1
+    k = lo
+    while k < len(t) and t[k] - tc <= tol:
+        if v[k] is not None:
+            if t[k] - tc < dist:
+                cel = v[k]
+            break
+        k += 1
+    return cel
+
+
+def masoara(id_: str, momente: list[float], coloane: list[str], dir_date=DIR_DATE, folder_activ=None) -> list[dict]:
+    """Pentru fiecare moment t: {coloana: {inainte (t-3 s), min (in [t-3, t+3]), t_min, dupa (t+3 s), cadere}}.
+    Coloanele care nu exista in sesiune lipsesc din rezultat."""
+    f = folder_sesiune(id_, dir_date)
+    d = _incarca_date(f, _este_activ(f, folder_activ))
+    rez = []
+    for te in momente:
+        r = {}
+        a = bisect.bisect_left(d.t, te - DT_INAINTE)
+        b = bisect.bisect_left(d.t, te + DT_DUPA + 1e-9)
+        for c in coloane:
+            v = d.coloane.get(c)
+            if v is None:
+                continue
+            mn, t_mn = None, None
+            for i in range(a, b):
+                if v[i] is not None and (mn is None or v[i] < mn):
+                    mn, t_mn = v[i], d.t[i]
+            inainte = _valoare_la(d.t, v, te - DT_INAINTE, TOL_VALOARE)
+            r[c] = {"inainte": inainte, "min": mn, "t_min": t_mn,
+                    "dupa": _valoare_la(d.t, v, te + DT_DUPA, TOL_VALOARE),
+                    "cadere": inainte - mn if inainte is not None and mn is not None else None}
+        rez.append(r)
+    return rez
+
+
 def rezumat(id_: str, dir_date=DIR_DATE, folder_activ=None) -> dict:
     """Min / medie / max pe fiecare coloana numerica, plus temperatura motorului la inceput si la sfarsit."""
     f = folder_sesiune(id_, dir_date)

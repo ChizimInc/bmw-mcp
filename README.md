@@ -31,6 +31,16 @@ Datele se salvează în `Documents\bmw-data\sesiuni\...`. Folderul se poate schi
 
 Cât timp loggerul înregistrează, nu folosi serverul MCP: EDIABAS acceptă o singură sesiune pe port.
 
+## Rezumat în consolă
+
+Doar citire, fără EDIABAS (merge și cât timp loggerul înregistrează):
+
+```
+.venv\Scripts\python.exe -m bmwdiag.rezumat <folder_sesiune sau id> [--date <folder>] [--coloane rpm,tmot] [--evenimente marcaj|steag|eroare] [--json]
+```
+
+Arată durata, min/medie/max pe coloană, steagurile pe tip, marcajele și steagurile cu valorile din ±3 s și erorile noi față de start.
+
 ## Server MCP
 
 Serverul rulează cu `.venv\Scripts\python.exe server.py` (transport stdio). Variabilele `EDIABAS_BIN` și `EDIABAS_ECU` pot înlocui căile implicite `C:\EDIABAS\Bin` și `C:\EDIABAS\ECU`. Unelte: `ediabas_check`, `list_ecus`, `list_jobs`, `describe_job`, `read_faults`, `run_job`.

@@ -212,8 +212,12 @@ Etapa 4 – Robustețe pentru drumul lung
 - Segmente, reconectare automată, prevenirea adormirii, blocarea a două instanțe, oprire curată.
 - Criteriu: 30 de minute cu `fake` fără pierderi; cu mașina, scoaterea și reintroducerea cablului produce `conexiune_pierduta` și apoi `conexiune_restabilita`, fără să se oprească sesiunea.
 
-Etapa 5 (opțională) – Rezumat (se face pe `bmwdiag/sesiuni.py`, vezi secțiunea 13)
+Etapa 5 – Rezumat în consolă (se face pe `bmwdiag/sesiuni.py`, vezi secțiunea 13)
 - `python -m bmwdiag.rezumat <folder_sesiune>`: durata, min/medie/max pe fiecare coloană, numărul de steaguri pe tip, lista marcajelor cu valorile din ±3 s în jurul lor. Fără biblioteci grele.
+- Realizat (04.11.2026). `bmwdiag/rezumat.py`, strat subțire peste `sesiuni.py`; doar citire, fără EDIABAS, doar biblioteca standard. Comandă: `python -m bmwdiag.rezumat <folder sau id> [--date <folder>] [--coloane a,b] [--evenimente marcaj|steag|eroare] [--json]`. Afișează în română: stare, profil, condiție, notă, durată, rânduri, cicluri/s, temperatura motorului la început și la sfârșit, steaguri pe tip, min/medie/max cu denumire și unitate din `nume_ro.json` (ce lipsește: nume brut), evenimentele cu tabelul „înainte (t−3 s) / minim (cu momentul) / după (t+3 s) / cădere” pentru rpm, sarcină, pedală, clapetă, tmot, și erorile noi față de start. Implicit se listează marcajele și steagurile; `--evenimente eroare` listează erorile de citire. Id inexistent sau ostil, folder greșit, coloană necunoscută → „Eroare: …” pe stderr și cod de ieșire 2. Fără ANSI.
+  - În `sesiuni.py` s-au adăugat `info(id)` (câmpurile din lista de sesiuni pentru o singură sesiune) și `masoara(id, momente, coloane)` (aceleași definiții ca `masoara` din `comparare.js`: înainte = t−3 s, după = t+3 s, minim în [t−3, t+3], toleranță 1,5 s).
+  - Argumentul e un id (căutat în folderul de date) sau o cale care conține `\` sau `/` și arată ca `…\sesiuni\<id>`.
+  - Teste: `tests/test_rezumat.py` (sesiune FakeSource, id ostil, un rând, fără `sesiune.json`, JSON valid, nimic modificat pe disc, fum pe datele reale).
 
 Etapele 6–9 (vizualizarea sesiunilor în interfața web): secțiunea 13.
 
@@ -329,7 +333,7 @@ Etapa 9 – Comparare rece / cald
   - Starea e în hash (`#a=&b=&c=&ea=&eb=&m=&w=`): schimbarea sesiunii creează intrare în istoric (Înapoi/Înainte), restul folosește `replaceState`; reîncărcarea păstrează totul. Fără internet, fără scriere.
   - Test: `test_pagina_comparare_fara_cdn_si_navigare` în `tests/test_webapp.py`.
 
-Etapa 5 (rezumat în consolă) se face pe `bmwdiag/sesiuni.py`, nu separat, ca să nu existe două implementări.
+Etapa 5 (rezumat în consolă) e făcută pe `bmwdiag/sesiuni.py`, nu separat, ca să nu existe două implementări.
 
 ### 13.7 Reguli pentru implementare
 
