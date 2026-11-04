@@ -203,6 +203,34 @@ class TestWebapp(unittest.TestCase):
             self.assertNotIn("http://", self.cere(cale)[1].decode("utf-8").replace("http://127", ""), cale)
             self.assertNotIn("https://", self.cere(cale)[1].decode("utf-8"), cale)
 
+    def test_fragment_api_si_pagina(self):
+        cod, corp, _ = self.cere("/fragment.js")
+        self.assertEqual(cod, 200)
+        self.assertNotIn("http://", corp.decode("utf-8"))
+        html = self.cere("/sesiuni.html")[1].decode("utf-8")
+        self.assertIn("fragment.js", html)
+        self.assertIn('id="bara-fragment"', html)
+        # o sesiune scurta, apoi rutele de fragment
+        self.assertEqual(self.j("/api/start", {"profil": "eveniment_rapid", "conditie": "rece"})[0], 200)
+        time.sleep(1.0)
+        self.j("/api/stop", {})
+        id_ = self.j("/api/sesiuni")[1][0]["id"]
+        cod, rz = self.j(f"/api/sesiuni/{id_}/rezumat?de_la=0&pana_la=0.5")
+        self.assertEqual(cod, 200)
+        self.assertIn("steaguri", rz)
+        self.assertLessEqual(rz["randuri"], self.j(f"/api/sesiuni/{id_}")[1]["rezumat"]["randuri"])
+        self.assertEqual(self.j(f"/api/sesiuni/{id_}/rezumat?de_la=abc")[0], 400)
+        self.assertEqual(self.j(f"/api/sesiuni/{id_}/fragmente"), (200, []))
+        cod, l = self.j(f"/api/sesiuni/{id_}/fragmente", {"nume": "Proba", "de_la": 0.1, "pana_la": 0.6})
+        self.assertEqual((cod, [x["nume"] for x in l]), (201, ["Proba"]))
+        self.assertEqual(self.j(f"/api/sesiuni/{id_}/fragmente", {"nume": "", "de_la": 0, "pana_la": 1})[0], 400)
+        self.assertEqual(self.j(f"/api/sesiuni/{id_}/fragmente", {"nume": "x", "de_la": 2, "pana_la": 1})[0], 400)
+        self.assertEqual(self.j(f"/api/sesiuni/{id_}/fragmente")[1][0]["pana_la"], 0.6)
+        self.assertEqual(self.j("/api/sesiuni/2020-01-01_000000_x/fragmente", {"nume": "a", "de_la": 0, "pana_la": 1})[0], 404)
+        self.assertEqual(self.j("/api/sesiuni/..%2Fx/fragmente", {"nume": "a", "de_la": 0, "pana_la": 1})[0], 400)
+        self.assertEqual(self.j(f"/api/sesiuni/{id_}/fragmente/f9/sterge", {})[0], 404)
+        self.assertEqual(self.j(f"/api/sesiuni/{id_}/fragmente/f1/sterge", {}), (200, []))
+
     def test_dictionar_nume_ro(self):
         cod, corp, _ = self.cere("/nume_ro.json")
         d = json.loads(corp.decode("utf-8"))

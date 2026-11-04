@@ -27,6 +27,7 @@ FISIERE_STATICE = {"/": ("index.html", "text/html"), "/index.html": ("index.html
                    "/sesiuni.html": ("sesiuni.html", "text/html"),
                    "/sesiuni.js": ("sesiuni.js", "application/javascript"),
                    "/sesiuni_date.js": ("sesiuni_date.js", "application/javascript"),
+                   "/fragment.js": ("fragment.js", "application/javascript"),
                    "/comparare.html": ("comparare.html", "text/html"),
                    "/comparare.js": ("comparare.js", "application/javascript"),
                    "/nume_ro.json": ("nume_ro.json", "application/json"),
@@ -208,6 +209,14 @@ def fa_handler(app: Aplicatie):
                     except ValueError:
                         return self._json(400, {"eroare": "Parametri numerici invalizi."})
                     return self._json(200, sesiuni.date(id_, cols, de_la, pana_la, mx, folder_activ=activ, **kw))
+                if ce == "rezumat":
+                    try:
+                        de_la, pana_la = (float(q[k][0]) if k in q else None for k in ("de_la", "pana_la"))
+                    except ValueError:
+                        return self._json(400, {"eroare": "Parametri numerici invalizi."})
+                    return self._json(200, sesiuni.rezumat(id_, folder_activ=activ, de_la=de_la, pana_la=pana_la, **kw))
+                if ce == "fragmente" and len(parti) == 2:
+                    return self._json(200, sesiuni.fragmente(id_, **kw))
                 if ce == "rand":
                     try:
                         t = float(q.get("t", [""])[0])
@@ -226,9 +235,27 @@ def fa_handler(app: Aplicatie):
             except sesiuni.NuExista as e:
                 return self._json(404, {"eroare": str(e)})
 
+        def _post_sesiuni(self, u, d):
+            """Singurele scrieri pe sesiuni: fragmentele cu nume (fisier separat, in bmw-data\\fragmente)."""
+            parti = [unquote(p) for p in u.path.split("/")[3:]]
+            kw = {"dir_date": app.dir_date}
+            try:
+                if len(parti) == 2 and parti[1] == "fragmente":
+                    return self._json(201, sesiuni.adauga_fragment(parti[0], d.get("nume"), d.get("de_la"),
+                                                                   d.get("pana_la"), **kw))
+                if len(parti) == 4 and parti[1] == "fragmente" and parti[3] == "sterge":
+                    return self._json(200, sesiuni.sterge_fragment(parti[0], parti[2], **kw))
+                return self._json(404, {"eroare": "nu există"})
+            except sesiuni.IdInvalid as e:
+                return self._json(400, {"eroare": str(e)})
+            except sesiuni.NuExista as e:
+                return self._json(404, {"eroare": str(e)})
+
         def do_POST(self):
             u = urlparse(self.path)
             d = self._corp()
+            if u.path.startswith("/api/sesiuni/"):
+                return self._post_sesiuni(u, d)
             if u.path == "/api/start":
                 cod, rez = app.start(str(d.get("profil", "")), str(d.get("conditie", "necunoscut")),
                                      str(d.get("nota", "")))

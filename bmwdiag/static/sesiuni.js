@@ -180,7 +180,7 @@ function deseneazaLista() {
 }
 
 // ---------- detaliu ----------
-async function incarcaDetaliu(id, tab) {
+async function incarcaDetaliu(id, tab, qs) {
   const jeton = ++jetonNav;
   eroarePagina("");
   tabCurent = FILE.some(([k]) => k === tab) ? tab : "rezumat";
@@ -192,7 +192,8 @@ async function incarcaDetaliu(id, tab) {
     const t0 = performance.now();
     const d = await (await api("/api/sesiuni/" + encodeURIComponent(id))).json();
     if (jeton !== jetonNav) return;
-    detaliu = { id, date: d, ms: Math.round(performance.now() - t0), jurnal: null };
+    detaliu = { id, date: d, ms: Math.round(performance.now() - t0), jurnal: null, fr: frDinQuery(qs), rezFr: null,
+      fragmente: [], mini: null };
   } catch (e) {
     if (jeton !== jetonNav) return;
     detaliu = null;
@@ -203,6 +204,7 @@ async function incarcaDetaliu(id, tab) {
   deseneazaAntet();
   deseneazaFile();
   deseneazaTab();
+  initFragment();
 }
 
 function deseneazaAntet() {
@@ -235,7 +237,7 @@ function deseneazaFile() {
 
 function alegeTab(k) {
   tabCurent = k;
-  history.replaceState(null, "", `#${detaliu.id}/${k}`);
+  history.replaceState(null, "", hashSesiune(k));
   deseneazaFile();
   deseneazaTab();
 }
@@ -251,15 +253,39 @@ function deseneazaTab() {
 }
 
 // --- Rezumat ---
+// Rezumatul pe fragment se cere serverului (aceleași definiții ca la toată sesiunea); cât se încarcă, întoarce null.
+function rezumatCurent(d) {
+  const fr = detaliu.fr;
+  if (!fr) return d.rezumat || {};
+  const cheie = `${fr.de}|${fr.pana}`, id = detaliu.id;
+  const c = detaliu.rezFr;
+  if (c && c.cheie === cheie) return c.date;
+  detaliu.rezFr = { cheie, date: null, eroare: null };
+  const stare = detaliu.rezFr;
+  api(`/api/sesiuni/${encodeURIComponent(id)}/rezumat?de_la=${fr.de}&pana_la=${fr.pana}`).then((r) => r.json())
+    .then((j) => { stare.date = j; }, (e) => { stare.eroare = e.message; })
+    .then(() => { if (detaliu && detaliu.id === id && detaliu.rezFr === stare && tabCurent === "rezumat") deseneazaTab(); });
+  return null;
+}
+
 function tabRezumat(d) {
-  const s = d.sesiune || {}, st = s.statistici || {}, rz = d.rezumat || {}, col = d.coloane || {};
+  const s = d.sesiune || {}, st = s.statistici || {}, col = d.coloane || {};
+  const fr = detaliu.fr;
+  const rz = rezumatCurent(d);
+  if (rz === null) {
+    const eroare = detaliu.rezFr && detaliu.rezFr.eroare;
+    return el("p", { class: eroare ? "mesaj eroare" : "gol", text: eroare ? "Nu pot calcula rezumatul fragmentului: " + eroare : "Se calculează rezumatul fragmentului…" });
+  }
   const rez = [];
   const avert = [];
+  if (fr) rez.push(el("p", { class: "avertisment-bloc fragment-info" },
+    `Fragment ${minSec(fr.de)} – ${minSec(fr.pana)} (${durata(fr.pana - fr.de)}). Durata, rândurile, mărimile, temperaturile și steagurile de mai jos sunt calculate doar pe fragment; „Joburi citite” și avertismentele rămân pe toată sesiunea.`));
   if (d.stare === "în desfășurare") avert.push(["Sesiunea rulează încă; datele se văd la momentul încărcării. Apasă „Reîmprospătează”.", false]);
   if (d.stare === "întreruptă") avert.push(["Sesiunea a fost întreruptă brusc (fără oprire curată); ultimul rând poate lipsi.", false]);
-  const steag = st.steaguri || {};
+  const steag = fr ? (rz.steaguri || {}) : (st.steaguri || {});
+  const steagSesiune = st.steaguri || {};
   if ((st.erori || 0) > 0) avert.push([`Au fost ${st.erori} erori de citire în timpul sesiunii.`, true]);
-  if (steag.conexiune_pierduta) avert.push([`Conexiunea s-a pierdut de ${steag.conexiune_pierduta} ori în timpul sesiunii.`, true]);
+  if (steagSesiune.conexiune_pierduta) avert.push([`Conexiunea s-a pierdut de ${steagSesiune.conexiune_pierduta} ori în timpul sesiunii.`, true]);
   for (const [t, rosu] of avert) rez.push(el("p", { class: "avertisment-bloc" + (rosu ? " rosu" : ""), text: t }));
 
   const dl = el("dl", { class: "stare lat-dl" });
@@ -269,10 +295,11 @@ function tabRezumat(d) {
   rand("Notă", s.nota);
   rand("Început", s.start ? dataRo(s.start, true) : null);
   rand("Sfârșit", s.stop ? dataRo(s.stop, true) : null);
-  rand("Durată", durata(rz.durata_s));
-  rand("Rânduri", rz.randuri === undefined ? null : nr(rz.randuri, 7));
+  if (fr) rand("Fragment", `${minSec(fr.de)} – ${minSec(fr.pana)}`);
+  rand(fr ? "Durată (fragment)" : "Durată", durata(rz.durata_s));
+  rand(fr ? "Rânduri (fragment)" : "Rânduri", rz.randuri === undefined ? null : nr(rz.randuri, 7));
   rand("Segmente (fișiere de date)", s.segmente);
-  const ciclS = s.stop ? st.cicluri_pe_s : (rz.durata_s > 0 ? rz.randuri / rz.durata_s : null);
+  const ciclS = s.stop && !fr ? st.cicluri_pe_s : (rz.durata_s > 0 ? rz.randuri / rz.durata_s : null);
   rand("Cicluri pe secundă", ciclS === undefined || ciclS === null ? null : nr(ciclS, 3));
   rand("Motiv oprire", s.motiv_oprire);
   if (rz.tmot_start !== undefined) rand("Temperatura motorului la început / la sfârșit", `${nr(rz.tmot_start)} °C → ${nr(rz.tmot_stop)} °C`);
@@ -284,7 +311,7 @@ function tabRezumat(d) {
   rez.push(el("div", { class: "sectiune" }, el("h3", { text: "Steaguri" }),
     sg.length ? tabel(["Steag", ["Număr", true]], sg.sort((a, b) => b[1] - a[1]).map(([n, c]) =>
       el("tr", {}, el("td", {}, numeSteag(n), n !== numeSteag(n) ? el("span", { class: "mic", text: `  (${n})` }) : null),
-        el("td", { class: "nr", text: String(c) })))) : gol("Niciun steag în această sesiune.")));
+        el("td", { class: "nr", text: String(c) })))) : gol(fr ? "Niciun steag în fragment." : "Niciun steag în această sesiune.")));
 
   const aliasuri = Object.keys(rz.coloane || {});
   const ordine = Object.keys(dict.coloane);
@@ -308,7 +335,7 @@ function tabRezumat(d) {
   }
   rez.push(el("div", { class: "sectiune" }, el("h3", { text: "Mărimi: minim / medie / maxim" }),
     aliasuri.length ? tabel(["Mărime", ["Minim", true], ["Medie", true], ["Maxim", true], "Unitate"], randuriMm)
-      : gol("Sesiunea nu are rânduri de date.")));
+      : gol(fr ? "Fragmentul nu are rânduri de date." : "Sesiunea nu are rânduri de date.")));
 
   const joburi = Object.entries(st.joburi || {});
   rez.push(el("div", { class: "sectiune" }, el("h3", { text: "Joburi citite" }),
@@ -321,8 +348,14 @@ function tabRezumat(d) {
 
 // --- Evenimente ---
 let filtruEv = "";
+function inFragment(t) { // evenimentele fără moment (t_rel_s lipsă) rămân vizibile
+  const fr = detaliu && detaliu.fr;
+  return !fr || typeof t !== "number" || (t >= fr.de && t <= fr.pana);
+}
+
 function tabEvenimente(d) {
-  const ev = d.evenimente || [];
+  const toate = d.evenimente || [];
+  const ev = toate.filter((e) => inFragment(e.t_rel_s));
   const tipuri = [...new Set(ev.map((e) => e.tip))];
   const sel = el("select", { id: "f-tip", onchange: (e) => { filtruEv = e.target.value; umpleEv(); } },
     el("option", { value: "", text: `toate (${ev.length})` }),
@@ -351,7 +384,7 @@ function tabEvenimente(d) {
     }
     if (!v.length) corp.append(el("tr", {}, el("td", { colspan: 5, class: "gol", text: "Niciun eveniment." })));
     const n = document.getElementById("numar-ev");
-    if (n) n.textContent = `${v.length} evenimente. „Timp” = minute:secunde de la start. Click pe un eveniment = îl arată în grafice (±${FEREASTRA_EV_S} s).`;
+    if (n) n.textContent = (ev.length < toate.length ? `Fragment: ${ev.length} din ${toate.length} evenimente (restul sunt în afara fragmentului). ` : "") + `${v.length} afișate. „Timp” = minute:secunde de la start. Click pe un eveniment = îl arată în grafice (±${FEREASTRA_EV_S} s).`;
   }
   queueMicrotask(umpleEv);
   return radacina;
@@ -367,9 +400,12 @@ function numeMoment(m) {
 }
 
 function tabErori(d) {
-  const citiri = d.erori || [];
-  if (!citiri.length) return gol("Sesiunea nu are citiri de erori.");
+  const toate = d.erori || [];
+  const citiri = toate.filter((c) => inFragment(c.t_rel_s));
+  if (!toate.length) return gol("Sesiunea nu are citiri de erori.");
   const rez = [];
+  if (citiri.length < toate.length) rez.push(el("p", { class: "mic", text: `Fragment: ${citiri.length} din ${toate.length} citiri de erori (restul sunt în afara fragmentului). „NOU” rămâne față de citirea de la start.` }));
+  if (!citiri.length) return [...rez, gol("Nicio citire de erori în fragment.")];
   const noi = new Set(citiri.flatMap((c) => c.erori.filter((e) => e.nou).map((e) => e.nr))).size;
   rez.push(el("p", { class: noi ? "avertisment-bloc rosu" : "mic",
     text: noi ? `Erori apărute după start: ${noi} (marcate „NOU”).` : "Nicio eroare nouă față de citirea de la start." }));
@@ -533,13 +569,15 @@ function tabFisiere(d) {
 // ---------- navigare ----------
 function ruta() {
   const h = decodeURIComponent(location.hash.replace(/^#/, ""));
-  const [id, tab] = h.split("/");
+  const [cale, qs] = h.split("?");
+  const [id, tab] = cale.split("/");
   if (!id) {
     $("vedere-detaliu").hidden = true;
     $("vedere-lista").hidden = false;
     curataGrafice();
     document.title = "Sesiuni – Logger BMW E90";
     detaliu = null;
+    curataFragment();
     incarcaLista();
     return;
   }
@@ -547,7 +585,7 @@ function ruta() {
   $("vedere-detaliu").hidden = false;
   document.title = "Sesiune – Logger BMW E90";
   window.scrollTo(0, 0);
-  incarcaDetaliu(id, tab);
+  incarcaDetaliu(id, tab, qs);
 }
 
 async function porneste() {

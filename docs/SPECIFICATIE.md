@@ -282,11 +282,14 @@ Navigare sus în pagină: „Înregistrare" (pagina actuală) și „Sesiuni". R
 
 Dicționar de denumiri: fișier `bmwdiag/static/nume_ro.json` cu `alias → {eticheta, unitate_afisata, grup}` pentru coloanele din profile (de ex. `rpm` → „Turație", `sarcina` → „Sarcina motorului (umplere)", `fr1` → „Factor lambda banca 1") și `STAT_*` → etichetă pentru instantaneu, luate din secțiunea 4. Ce nu e în dicționar se afișează cu numele brut, fără eroare. Unitățile vin din `coloane.json`, nu se dublează.
 
-### 13.5 API (doar GET, JSON)
+### 13.5 API (JSON; GET, plus scrierea fragmentelor salvate)
 
 - `GET /api/sesiuni` → lista (câmpurile din tabelul de listă; calculate din `sesiune.json`; dacă lipsește, din CSV și din `evenimente.csv`).
 - `GET /api/sesiuni/<id>` → `sesiune.json` fără `profil_toml`, `coloane.json`, rezumat calculat (min/medie/max), evenimente, erori (parsate, fără câmpuri tehnice), instantaneu (parsat), starea („finalizată" / „în desfășurare" / „întreruptă").
 - `GET /api/sesiuni/<id>/date?coloane=rpm,tmot&de_la=<s>&pana_la=<s>&max=<n>` → format pe coloane: `{"t":[...], "rpm":[...], "tmot":[...]}` cu `null` pentru celulele goale; `max` activează reducerea min/max.
+- `GET /api/sesiuni/<id>/rezumat?de_la=<s>&pana_la=<s>` → același rezumat ca în `/api/sesiuni/<id>` (min/medie/max, `randuri`, `durata_s`, `tmot_start/stop`), dar doar pe fragment (capete incluse; fără parametri = toată sesiunea). Cu fragment, în plus: `de_la`/`pana_la` (primul și ultimul moment real) și `steaguri` (pe tip, din `evenimente.csv`).
+- `GET /api/sesiuni/<id>/fragmente` → fragmentele salvate: `[{id, nume, de_la, pana_la, creat}]`, ordonate după început.
+- `POST /api/sesiuni/<id>/fragmente` cu `{nume, de_la, pana_la}` → 201 și lista actualizată. 400 la nume gol sau mai lung de 60 de caractere, capete nenumerice, `de_la < 0` sau `de_la >= pana_la`, ori peste 50 de fragmente pe sesiune. `POST /api/sesiuni/<id>/fragmente/<fid>/sterge` → lista actualizată (404 dacă nu există). Fragmentele se scriu în `bmw-data\fragmente\<id>.json` (scriere atomică), NU în folderul sesiunii: fișierele sesiunii rămân neatinse. Sunt singura scriere a acestor rute.
 - `GET /api/sesiuni/<id>/rand?t=<s>` → rândul cel mai apropiat de momentul `t` (pentru cardul „la acest moment").
 - `GET /api/sesiuni/<id>/fisier/<nume>` → descărcare din lista albă.
 - `GET /api/sesiuni/<id>/jurnal` → text.
@@ -349,3 +352,13 @@ Etapa 5 (rezumat în consolă) e făcută pe `bmwdiag/sesiuni.py`, nu separat, c
 2. Comparația rece/cald (Etapa 9): se face după ce merge vizualizarea unei sesiuni (implicit).
 3. Notă ulterioară pe o sesiune (de ex. „aici am apăsat gazul în podea"): în v1 nu; dacă se vrea, se salvează într-un fișier separat `note_ulterioare.txt`, fără a atinge `sesiune.json`.
 4. Folderele vechi `<data>_etapa*` din `bmw-data`: nu se afișează în v1.
+
+Etapa 10 – Fragment global (slider) și fragmente salvate
+- La citirea unei sesiuni alegi un interval `[de, până]` și toată pagina arată datele doar pentru el.
+
+- Realizat (04.11.2026). `static/fragment.js` (încărcat după `sesiuni_date.js`, rută statică `/fragment.js`), bara `#bara-fragment` în `sesiuni.html`, stiluri `.fragment` / `.fr-*` în `style.css`. Detalii:
+  - Bara „Fragment” stă deasupra filelor și rămâne la schimbarea lor. Slider dublu peste un minigrafic (turație, altfel viteză sau temperatura motorului) cu marcajele evenimentelor. Gesturi: tragi pe minigrafic = fragment nou; tragi un mâner = ajustezi un capăt; tragi zona = o muți; dublu-click sau „Toată sesiunea” = resetare. Mânerele sunt `role="slider"` și merg cu tastatura (←/→ 1 s, Shift 10 s, Ctrl 0,1 s, Home/End). Funcționează și cu degetul (`touch-action: none`). Mai sunt câmpurile „De la” / „Până la” (secunde sau m:ss) și lista „În jurul unui eveniment (±5 s)”.
+  - Se aplică la eliberare (nu la fiecare mișcare), cu `replaceState`. Starea e în hash: `#<id>/<tab>?de=<s>&pana=<s>`; reîncărcarea și linkul o păstrează. Un fragment din link în afara sesiunii se aduce în limite. Fără parametri înseamnă toată sesiunea.
+  - Efectul pe file: **Rezumat** se recalculează pe server (`/rezumat?de_la&pana_la`; „Joburi citite” și avertismentele rămân pe toată sesiunea, cu notă); **Grafice** cer datele fragmentului la rezoluție completă (max 5000 de puncte doar pe fragment), iar „Vedere de ansamblu”, −, +, ← și → rămân în fragment; **Tabel** aplică filtrul „De la / Până la” în interiorul fragmentului; **Evenimente** și **Erori** arată doar ce cade în fragment (cu numărul celor ascunse; „NOU” la erori rămâne față de citirea de la start). „Vezi în grafice” pe un eveniment din afara fragmentului renunță la fragment.
+  - Fragmente salvate cu nume (butonul „Salvează fragmentul”, chip-uri cu aplicare și ștergere cu confirmare), pe sesiune. Se vor putea folosi mai departe la comparare (încă nu).
+  - Teste: `test_rezumat_pe_fragment`, `test_fragmente_salvate`, `test_fragmente_date_invalide`, `test_fragmente_fisier_stricat` în `tests/test_sesiuni.py`; `test_fragment_api_si_pagina` în `tests/test_webapp.py`. Verificat în browser pe două sesiuni reale (rece 12.040 rânduri / cald, copiate într-un folder temporar): tragere cu mouse real, tastatură, reîncărcare, salvare/aplicare/ștergere, toate filele, ecran de 375 px (fără scroll orizontal), temă deschisă și închisă.

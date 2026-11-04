@@ -260,23 +260,98 @@ def masoara(id_: str, momente: list[float], coloane: list[str], dir_date=DIR_DAT
     return rez
 
 
-def rezumat(id_: str, dir_date=DIR_DATE, folder_activ=None) -> dict:
-    """Min / medie / max pe fiecare coloana numerica, plus temperatura motorului la inceput si la sfarsit."""
+def rezumat(id_: str, dir_date=DIR_DATE, folder_activ=None, de_la: float | None = None,
+            pana_la: float | None = None) -> dict:
+    """Min / medie / max pe fiecare coloana numerica, plus temperatura motorului la inceput si la sfarsit.
+    Cu de_la / pana_la (secunde de la start, capete incluse) se calculeaza doar pe acel fragment; atunci rezultatul
+    are in plus de_la / pana_la (primul si ultimul moment real) si steaguri (pe tip, din evenimente) din fragment."""
     f = folder_sesiune(id_, dir_date)
     d = _incarca_date(f, _este_activ(f, folder_activ))
+    fragment = de_la is not None or pana_la is not None
+    a = bisect.bisect_left(d.t, de_la) if de_la is not None else 0
+    b = bisect.bisect_right(d.t, pana_la) if pana_la is not None else len(d.t)
     mm = {}
     for c, vals in d.coloane.items():
         if c in ("ciclu",):
             continue
-        v = [x for x in vals if x is not None]
+        v = [x for x in vals[a:b] if x is not None]
         if v:
             mm[c] = {"min": min(v), "medie": sum(v) / len(v), "max": max(v), "n": len(v)}
-    rez = {"randuri": len(d.t), "durata_s": (d.t[-1] - d.t[0]) if d.t else 0, "coloane": mm}
+    n = max(0, b - a)
+    rez = {"randuri": n, "durata_s": (d.t[b - 1] - d.t[a]) if n else 0, "coloane": mm}
     if "tmot" in d.coloane:
-        v = [x for x in d.coloane["tmot"] if x is not None]
+        v = [x for x in d.coloane["tmot"][a:b] if x is not None]
         if v:
             rez["tmot_start"], rez["tmot_stop"] = v[0], v[-1]
+    if fragment:
+        rez["de_la"], rez["pana_la"] = (d.t[a], d.t[b - 1]) if n else (de_la, pana_la)
+        steaguri: dict[str, int] = {}
+        for e in _evenimente(f):
+            t = e["t_rel_s"]
+            if e["tip"] == "steag" and t is not None and (de_la is None or t >= de_la) and (pana_la is None or t <= pana_la):
+                nume = e["detalii"].split(":", 1)[0].strip()
+                steaguri[nume] = steaguri.get(nume, 0) + 1
+        rez["steaguri"] = steaguri
     return rez
+
+
+# ---------- fragmente salvate (singurul lucru scris de acest modul; in afara folderului sesiunii) ----------
+MAX_FRAGMENTE = 50
+MAX_NUME_FRAGMENT = 60
+
+
+def _cale_fragmente(id_: str, dir_date) -> Path:
+    folder_sesiune(id_, dir_date)  # valideaza id-ul (forma + exista), deci numele de fisier e sigur
+    return Path(dir_date) / "fragmente" / f"{id_}.json"
+
+
+def fragmente(id_: str, dir_date=DIR_DATE) -> list[dict]:
+    """Fragmentele salvate ale sesiunii: [{id, nume, de_la, pana_la, creat}], in ordinea inceputului."""
+    j = _json(_cale_fragmente(id_, dir_date))
+    lista_ = (j or {}).get("fragmente") if isinstance(j, dict) else None
+    rez = []
+    for x in lista_ if isinstance(lista_, list) else []:
+        if (isinstance(x, dict) and isinstance(x.get("id"), str) and isinstance(x.get("nume"), str)
+                and isinstance(x.get("de_la"), (int, float)) and isinstance(x.get("pana_la"), (int, float))):
+            rez.append(x)
+    return sorted(rez, key=lambda x: (x["de_la"], x["pana_la"]))
+
+
+def _scrie_fragmente(id_: str, lista_: list[dict], dir_date) -> None:
+    cale = _cale_fragmente(id_, dir_date)
+    cale.parent.mkdir(parents=True, exist_ok=True)
+    tmp = cale.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"fragmente": lista_}, ensure_ascii=False, indent=1), encoding="utf-8")
+    tmp.replace(cale)
+
+
+def adauga_fragment(id_: str, nume, de_la, pana_la, dir_date=DIR_DATE) -> list[dict]:
+    """Salveaza un fragment cu nume; intoarce lista actualizata. Date invalide -> IdInvalid (HTTP 400)."""
+    nume = nume.strip() if isinstance(nume, str) else ""
+    if not nume or len(nume) > MAX_NUME_FRAGMENT:
+        raise IdInvalid(f"Numele fragmentului trebuie să aibă 1–{MAX_NUME_FRAGMENT} caractere.")
+    for v in (de_la, pana_la):
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v != v or v in (float("inf"), float("-inf")):
+            raise IdInvalid("Capetele fragmentului trebuie să fie numere (secunde).")
+    if not 0 <= de_la < pana_la:
+        raise IdInvalid("Fragmentul trebuie să aibă 0 ≤ început < sfârșit.")
+    lista_ = fragmente(id_, dir_date)
+    if len(lista_) >= MAX_FRAGMENTE:
+        raise IdInvalid(f"Cel mult {MAX_FRAGMENTE} fragmente pe sesiune.")
+    nr = 1 + max([int(x["id"][1:]) for x in lista_ if re.fullmatch(r"f\d+", x["id"])] or [0])
+    lista_.append({"id": f"f{nr}", "nume": nume, "de_la": round(float(de_la), 3), "pana_la": round(float(pana_la), 3),
+                   "creat": datetime.now().isoformat(timespec="seconds")})
+    _scrie_fragmente(id_, lista_, dir_date)
+    return fragmente(id_, dir_date)
+
+
+def sterge_fragment(id_: str, id_fragment: str, dir_date=DIR_DATE) -> list[dict]:
+    lista_ = fragmente(id_, dir_date)
+    ramase = [x for x in lista_ if x["id"] != id_fragment]
+    if len(ramase) == len(lista_):
+        raise NuExista(f"Nu există fragmentul {id_fragment!r}")
+    _scrie_fragmente(id_, ramase, dir_date)
+    return ramase
 
 
 def _erori(f: Path) -> list[dict]:

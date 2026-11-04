@@ -148,6 +148,71 @@ class TestSesiuni(unittest.TestCase):
         with self.assertRaises(sesiuni.IdInvalid):
             sesiuni.date(self.id1, ["nu_exista"], **self.kw())
 
+    def test_rezumat_pe_fragment(self):
+        tot = sesiuni.rezumat(self.id1, **self.kw())
+        d = sesiuni.date(self.id1, ["rpm"], **self.kw())
+        t0, t1 = d["t"][0], d["t"][-1]
+        mijloc = (t0 + t1) / 2
+        fr = sesiuni.rezumat(self.id1, de_la=t0, pana_la=mijloc, **self.kw())
+        asteptat = [i for i, t in enumerate(d["t"]) if t <= mijloc]
+        self.assertEqual(fr["randuri"], len(asteptat))
+        self.assertLess(fr["randuri"], tot["randuri"])
+        vals = [d["rpm"][i] for i in asteptat if d["rpm"][i] is not None]
+        self.assertAlmostEqual(fr["coloane"]["rpm"]["max"], max(vals))
+        self.assertAlmostEqual(fr["coloane"]["rpm"]["medie"], sum(vals) / len(vals))
+        self.assertEqual(fr["de_la"], d["t"][0])
+        self.assertLessEqual(fr["pana_la"], mijloc)
+        self.assertIn("steaguri", fr)
+        self.assertNotIn("de_la", tot)  # fara fragment: acelasi format ca inainte
+        # fragment fara randuri
+        gol = sesiuni.rezumat(self.id1, de_la=t1 + 100, pana_la=t1 + 200, **self.kw())
+        self.assertEqual((gol["randuri"], gol["durata_s"], gol["coloane"]), (0, 0, {}))
+        # doar un capat
+        self.assertEqual(sesiuni.rezumat(self.id1, de_la=t0, **self.kw())["randuri"], tot["randuri"])
+
+    def test_fragmente_salvate(self):
+        self.assertEqual(sesiuni.fragmente(self.id1, **self.kw()), [])
+        l = sesiuni.adauga_fragment(self.id1, "  Cuplare 2 ", 3.5, 8, **self.kw())
+        self.assertEqual([(x["id"], x["nume"], x["de_la"], x["pana_la"]) for x in l], [("f1", "Cuplare 2", 3.5, 8.0)])
+        sesiuni.adauga_fragment(self.id1, "Început", 0, 2, **self.kw())
+        l = sesiuni.fragmente(self.id1, **self.kw())
+        self.assertEqual([x["nume"] for x in l], ["Început", "Cuplare 2"])  # ordonate dupa inceput
+        # fisierul e in afara folderului sesiunii, care ramane neatins
+        self.assertTrue((self.dir / "fragmente" / f"{self.id1}.json").is_file())
+        self.assertFalse(any("fragment" in p.name for p in self.f1.iterdir()))
+        self.assertEqual(sesiuni.fragmente(self.id2, **self.kw()), [])  # pe sesiune
+        # id nou dupa stergere nu il reutilizeaza pe unul existent
+        sesiuni.sterge_fragment(self.id1, "f1", **self.kw())
+        l = sesiuni.adauga_fragment(self.id1, "Altul", 5, 6, **self.kw())
+        self.assertEqual(sorted(x["id"] for x in l), ["f2", "f3"])
+        with self.assertRaises(sesiuni.NuExista):
+            sesiuni.sterge_fragment(self.id1, "f1", **self.kw())
+        for x in list(l):
+            sesiuni.sterge_fragment(self.id1, x["id"], **self.kw())
+        self.assertEqual(sesiuni.fragmente(self.id1, **self.kw()), [])
+
+    def test_fragmente_date_invalide(self):
+        for nume, de, pana in [("", 1, 2), ("   ", 1, 2), ("x" * 61, 1, 2), (None, 1, 2), ("a", 2, 2), ("a", 3, 2),
+                               ("a", -1, 2), ("a", "1", 2), ("a", True, 2), ("a", float("nan"), 2),
+                               ("a", 1, float("inf"))]:
+            with self.assertRaises(sesiuni.IdInvalid, msg=repr((nume, de, pana))):
+                sesiuni.adauga_fragment(self.id1, nume, de, pana, **self.kw())
+        with self.assertRaises(sesiuni.IdInvalid):
+            sesiuni.fragmente("../x", **self.kw())
+        with self.assertRaises(sesiuni.NuExista):
+            sesiuni.fragmente("2020-01-01_000000_inexistent", **self.kw())
+        self.assertEqual(sesiuni.fragmente(self.id1, **self.kw()), [])
+
+    def test_fragmente_fisier_stricat(self):
+        c = self.dir / "fragmente"
+        c.mkdir(exist_ok=True)
+        (c / f"{self.id2}.json").write_text("nu e json", encoding="utf-8")
+        self.assertEqual(sesiuni.fragmente(self.id2, **self.kw()), [])
+        (c / f"{self.id2}.json").write_text(json.dumps({"fragmente": [{"id": "f1"}, 5, {"id": "f2", "nume": "ok", "de_la": 1, "pana_la": 2}]}),
+                                            encoding="utf-8")
+        self.assertEqual([x["id"] for x in sesiuni.fragmente(self.id2, **self.kw())], ["f2"])
+        (c / f"{self.id2}.json").unlink()
+
 
 class TestSesiuniReale(unittest.TestCase):
     """Test de fum pe datele reale din bmw-data; sarit daca folderul lipseste."""

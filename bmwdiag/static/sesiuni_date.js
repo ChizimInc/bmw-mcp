@@ -257,20 +257,23 @@ function redeseneaza() {
 }
 
 async function incarcaInitial(g) {
-  const s = sg, cheieCache = g.def.cols.join(",");
+  const s = sg, fr = detaliu.fr, cheieCache = (fr ? `${fr.de}-${fr.pana}|` : "") + g.def.cols.join(",");
   try {
     let d = s.cache.get(cheieCache);
     const t0 = performance.now();
-    if (!d) {
-      d = await (await api(urlDate(s.id, g.def.cols, null, null, PUNCTE_ANSAMBLU))).json();
+    if (!d) { // cu fragment: datele fragmentului la rezoluție completă (max 5000 de puncte doar pe fragment)
+      d = await (await api(urlDate(s.id, g.def.cols, fr ? fr.de : null, fr ? fr.pana : null, PUNCTE_ANSAMBLU))).json();
       s.cache.set(cheieCache, d);
     }
     if (g.mort) return;
     g.descarcare = performance.now() - t0;
     g.brut = g.date = d;
-    if (!d.t || !d.t.length) { g.zona.textContent = "Fără rânduri de date."; return; }
-    s.t0 = s.t0 === null ? d.t[0] : Math.min(s.t0, d.t[0]);
-    s.t1 = s.t1 === null ? d.t[d.t.length - 1] : Math.max(s.t1, d.t[d.t.length - 1]);
+    if (!d.t || !d.t.length) { g.zona.textContent = fr ? "Fără rânduri de date în fragment." : "Fără rânduri de date."; return; }
+    if (fr) { s.t0 = fr.de; s.t1 = fr.pana; } // vederea de ansamblu = exact fragmentul
+    else {
+      s.t0 = s.t0 === null ? d.t[0] : Math.min(s.t0, d.t[0]);
+      s.t1 = s.t1 === null ? d.t[d.t.length - 1] : Math.max(s.t1, d.t[d.t.length - 1]);
+    }
     if (s.mod === "ora") await decalajOra();
     if (g.mort) return;
     construieste(g);
@@ -494,8 +497,17 @@ function laCursor(u) {
 function sariLaEveniment(e) {
   if (typeof e.t_rel_s !== "number") return;
   const s = stareGrafice();
+  const fr = detaliu.fr;
+  if (fr && (e.t_rel_s < fr.de || e.t_rel_s > fr.pana)) { // evenimentul e în afara fragmentului: se renunță la fragment
+    detaliu.fr = null;
+    detaliu.rezFr = null;
+    s.cache.clear(); s.t0 = s.t1 = null;
+    actualizeazaFragment();
+  }
+  const lim = detaliu.fr;
   s.fereastra = { t: e.t_rel_s, ev: e, valori: null };
-  s.x = { min: e.t_rel_s - FEREASTRA_EV_S, max: e.t_rel_s + FEREASTRA_EV_S };
+  s.x = { min: lim ? Math.max(e.t_rel_s - FEREASTRA_EV_S, lim.de) : e.t_rel_s - FEREASTRA_EV_S,
+    max: lim ? Math.min(e.t_rel_s + FEREASTRA_EV_S, lim.pana) : e.t_rel_s + FEREASTRA_EV_S };
   for (const nume of ["Turație", "Sarcină și cuplu", "Temperaturi"]) s.active.add(nume);
   alegeTab("grafice");
 }
@@ -708,7 +720,9 @@ function construiesteTabel(d, date, cols, off, msIncarcare) {
   const fPana = el("input", { type: "text", id: "tv-pana", placeholder: "ex. 180 sau 3:00", "aria-label": "Până la timpul (secunde sau m:ss)" });
   const fMarcate = el("input", { type: "checkbox", id: "tv-marcate" });
   function filtreaza() {
-    const de = parseTimp(fDe.value), pana = parseTimp(fPana.value);
+    const fr = detaliu && detaliu.fr; // fragmentul global e limita; filtrul de aici se aplică în interiorul lui
+    let de = parseTimp(fDe.value), pana = parseTimp(fPana.value);
+    if (fr) { de = de === null ? fr.de : Math.max(de, fr.de); pana = pana === null ? fr.pana : Math.min(pana, fr.pana); }
     const a = de === null ? 0 : limitaInf(t, de), b = pana === null ? n : limitaSup(t, pana);
     if (fMarcate.checked) vis = marcate.filter((i) => i >= a && i < b);
     else { vis = new Array(Math.max(0, b - a)); for (let k = 0; k < vis.length; k++) vis[k] = a + k; }
@@ -716,7 +730,7 @@ function construiesteTabel(d, date, cols, off, msIncarcare) {
     scroller.scrollTop = 0;
     randuri.forEach((r) => { r.v = -1; });
     numar.textContent = `${vis.length.toLocaleString("ro-RO")} din ${n.toLocaleString("ro-RO")} rânduri afișate.`
-      + (de !== null || pana !== null ? " Interval: " + (de === null ? "început" : fmtRel(de, 1)) + " – " + (pana === null ? "sfârșit" : fmtRel(pana, 1)) + "." : "");
+      + (de !== null || pana !== null ? (fr ? " Fragment activ: " : " Interval: ") + (de === null ? "început" : fmtRel(de, 1)) + " – " + (pana === null ? "sfârșit" : fmtRel(pana, 1)) + "." : "");
     deseneaza();
   }
   fDe.addEventListener("input", filtreaza);
