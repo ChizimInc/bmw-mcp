@@ -171,10 +171,12 @@ def _fa_rezumat_lista(f: Path, folder_activ) -> dict:
         d = _incarca_date(f, True)
         if d.t:
             randuri = len(d.t)
-            durata = d.t[-1] - d.t[0] if durata is None else durata
+            neinchisa = not s.get("stop")  # sesiune.json are statistici zero pana la oprire: calculam din date
+            if durata is None or (neinchisa and not durata):
+                durata = d.t[-1] - d.t[0]
             if not start:
                 start = d.text["t_iso"][0]
-            if ciclu_s is None and d.t[-1] > d.t[0]:
+            if (ciclu_s is None or (neinchisa and not ciclu_s)) and d.t[-1] > d.t[0]:
                 ciclu_s = round(len(d.t) / (d.t[-1] - d.t[0]), 3)
     if not start:
         m = re.match(r"^(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(\d{2})", id_)

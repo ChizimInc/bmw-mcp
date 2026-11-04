@@ -23,7 +23,10 @@ from .recorder import CONDITII, DIR_DATE, Recorder, _json, citeste_erori, creeaz
 
 DIR_STATIC = Path(__file__).resolve().parent / "static"
 FISIERE_STATICE = {"/": ("index.html", "text/html"), "/index.html": ("index.html", "text/html"),
-                   "/app.js": ("app.js", "application/javascript"), "/style.css": ("style.css", "text/css")}
+                   "/app.js": ("app.js", "application/javascript"), "/style.css": ("style.css", "text/css"),
+                   "/sesiuni.html": ("sesiuni.html", "text/html"),
+                   "/sesiuni.js": ("sesiuni.js", "application/javascript"),
+                   "/nume_ro.json": ("nume_ro.json", "application/json")}
 AVERTISMENT_MCP = "Cât timp înregistrezi, nu folosi serverul MCP din chat."
 
 

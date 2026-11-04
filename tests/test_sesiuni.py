@@ -97,6 +97,22 @@ class TestSesiuni(unittest.TestCase):
         activ = next(s for s in sesiuni.lista(folder_activ=f, **self.kw()) if s["id"] == nou)
         self.assertEqual(activ["stare"], "în desfășurare")
 
+    def test_sesiune_activa_cu_statistici_zero_in_json(self):
+        """Pana la oprire sesiune.json are statistici zero: durata si cicluri/s se calculeaza din date."""
+        nou = "2026-01-03_120000_activa_cald"
+        f = self.dir / "sesiuni" / nou
+        f.mkdir()
+        (f / "sesiune.json").write_text(json.dumps({"profil": "activa", "conditie": "cald", "start": "2026-01-03T12:00:00",
+                                                    "statistici": {"durata_s": 0.0, "cicluri_pe_s": 0.0}}),
+                                        encoding="utf-8")
+        (f / "date_001.csv").write_text("t_iso,t_rel_s,ciclu,ciclu_ms,rpm,marcaj,steaguri\n"
+                                        "2026-01-03T12:00:00.0,0.0,1,10,800,,\n"
+                                        "2026-01-03T12:00:02.0,2.0,2,10,810,,\n", encoding="utf-8")
+        s = next(s for s in sesiuni.lista(folder_activ=f, **self.kw()) if s["id"] == nou)
+        self.assertEqual(s["stare"], "în desfășurare")
+        self.assertEqual(s["durata_s"], 2.0)
+        self.assertEqual(s["cicluri_pe_s"], 1.0)
+
     def test_un_singur_rand(self):
         nou = "2026-01-02_120000_unu_necunoscut"
         f = self.dir / "sesiuni" / nou

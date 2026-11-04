@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sesiuni – Logger BMW E90</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <nav class="nav" aria-label="Navigare">
+    <a href="/index.html">Înregistrare</a>
+    <a href="/sesiuni.html" aria-current="page">Sesiuni</a>
+  </nav>
+  <h1>Sesiuni salvate <span class="mic">(doar citire)</span></h1>
+</header>
+
+<main class="pagina">
+  <p class="mesaj eroare" id="eroare-pagina" role="alert" hidden></p>
+
+  <section id="vedere-lista" aria-labelledby="t-lista">
+    <div class="panou">
+      <h2 id="t-lista">Lista sesiunilor</h2>
+      <div class="filtre">
+        <label>Condiție
+          <select id="f-conditie">
+            <option value="">toate</option>
+            <option value="rece">rece</option>
+            <option value="cald">cald</option>
+            <option value="necunoscut">necunoscut</option>
+          </select>
+        </label>
+        <label>Profil
+          <select id="f-profil"><option value="">toate</option></select>
+        </label>
+        <label>Text în notă
+          <input type="search" id="f-nota" placeholder="caută în notă">
+        </label>
+        <button id="reimprospateaza-lista" type="button">Reîmprospătează</button>
+      </div>
+      <p class="mic" id="numar-sesiuni" role="status"></p>
+      <div class="derulare">
+        <table class="lista">
+          <thead>
+            <tr>
+              <th>Data</th><th>Profil</th><th>Condiție</th><th>Durată</th><th class="nr">Rânduri</th>
+              <th class="nr">Cicluri/s</th><th>Steaguri</th><th>Notă</th><th>Motiv oprire</th><th>Stare</th>
+            </tr>
+          </thead>
+          <tbody id="corp-lista"><tr><td colspan="10" class="gol">Se încarcă…</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section id="vedere-detaliu" aria-labelledby="t-detaliu" hidden>
+    <div class="panou">
+      <p class="bara-detaliu">
+        <a href="#" id="inapoi" class="inapoi">← Toate sesiunile</a>
+        <button id="reimprospateaza-detaliu" type="button">Reîmprospătează</button>
+      </p>
+      <h2 id="t-detaliu">Sesiune</h2>
+      <p id="antet-detaliu" class="antet-detaliu"></p>
+      <div class="file" role="tablist" aria-label="Părțile sesiunii" id="file"></div>
+      <div id="continut-tab" role="tabpanel" tabindex="0"></div>
+    </div>
+  </section>
+</main>
+<script src="sesiuni.js"></script>
+</body>
+</html>

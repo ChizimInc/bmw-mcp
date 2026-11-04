@@ -298,6 +298,12 @@ Etapa 6 – Citirea și API-ul (fără interfață)
 
 Etapa 7 – Pagina „Sesiuni": listă, rezumat, evenimente, erori, instantaneu, jurnal, fișiere (fără grafice)
 - Criteriu: se poate alege oricare din cele 9 sesiuni, iar proprietarul vede în română durata, steagurile, marcajele, erorile și instantaneul fără să deschidă un fișier. Merge cu Înapoi/Înainte și cu reîncărcarea paginii. Cu o înregistrare activă, lista arată sesiunea ca „în desfășurare".
+- Realizat (04.11.2026). `bmwdiag/static/sesiuni.html` + `sesiuni.js`, rute statice `/sesiuni.html`, `/sesiuni.js`, `/nume_ro.json`; navigare „Înregistrare / Sesiuni" în ambele pagini. Detalii de implementare:
+  - Rută: `#<id>` (lista → detaliu) și `#<id>/<tab>` (tab: `rezumat`, `evenimente`, `erori`, `instantaneu`, `jurnal`, `fisiere`). Schimbarea filei folosește `replaceState` (Înapoi duce la listă, nu prin toate filele); reîncărcarea păstrează sesiunea și fila.
+  - `nume_ro.json` are cheile: `coloane` (alias → `eticheta`, `unitate_afisata`, `grup`), `stat` (`STAT_*`/`ID_*`/`ZIF_*` → etichetă), `joburi` (job → denumire), `steaguri` (tip steag → denumire), `unitati` (unitatea brută → afișată, ex. `min-1` → `rpm`), `erori_detalii`. Ce lipsește se afișează cu numele brut. Un test verifică că fiecare alias și fiecare rezultat din `profiles/*.toml` are denumire.
+  - „Detalii tehnice" la instantaneu: serverul scoate deja `_TEL_*`, `JOB_STATUS` și valorile `hex:`; butonul de pe fiecare carte arată numele brut al câmpului, starea jobului și numărul de seturi. Câmpurile cu VIN (cheie cu `VIN`/`FGNR`/`FAHRGEST` sau valoare de 17 caractere de tip VIN) sunt mascate cu buton „Arată".
+  - Pe ecran îngust (≤ 640 px) lista devine cartele (câte un bloc pe sesiune).
+  - Corecție în `sesiuni.py`: pentru o sesiune fără `stop` (activă sau întreruptă), durata și ciclurile/s se calculează din date, deoarece `sesiune.json` are statistici zero până la oprire.
 
 Etapa 8 – Grafice și tabel
 - uPlot local (`static/vendor/`, licența inclusă), presetările din 13.4, linii verticale pentru evenimente, zoom, sincronizare cursor, tabelul virtualizat.

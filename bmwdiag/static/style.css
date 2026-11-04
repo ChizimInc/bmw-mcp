@@ -139,3 +139,110 @@ table.valori { width: 100%; border-collapse: collapse; font-variant-numeric: tab
 .jurnal li.eroare { color: var(--rosu); }
 .jurnal li.avertisment { color: var(--galben); }
 .jurnal li.steag { color: var(--accent); font-weight: 600; }
+
+/* --- navigare și pagina „Sesiuni” --- */
+.nav { display: flex; gap: 6px; margin: 0 0 10px; }
+.nav a {
+  padding: 8px 14px;
+  border: 1px solid var(--linie);
+  border-radius: 6px;
+  background: var(--panou);
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.nav a[aria-current="page"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+@media (prefers-color-scheme: dark) { .nav a[aria-current="page"] { color: #111; } }
+.nav a:focus-visible, a:focus-visible, summary:focus-visible, [role="tab"]:focus-visible, [role="tabpanel"]:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+main.pagina { display: block; max-width: 1280px; margin: 0 auto; }
+input[type="search"], input[type="text"] {
+  display: block; width: 100%; margin-top: 4px; padding: 8px; font: inherit; color: inherit;
+  background: var(--fundal); border: 1px solid var(--linie); border-radius: 6px;
+}
+.filtre { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: end; margin-bottom: 10px; }
+.filtre label { flex: 1 1 160px; font-weight: 600; }
+.derulare { overflow-x: auto; }
+table.lista, table.tabel { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.lista th, .lista td, .tabel th, .tabel td {
+  text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--linie); vertical-align: top;
+}
+.lista th, .tabel th { color: var(--slab); font-weight: 600; white-space: nowrap; }
+.lista td.nr, .lista th.nr, .tabel td.nr, .tabel th.nr { text-align: right; }
+.lista tbody tr { cursor: pointer; }
+.lista tbody tr:hover { background: var(--gri-fundal); }
+.lista td a { color: var(--accent); font-weight: 600; text-decoration: none; white-space: nowrap; }
+.lista td.nota { min-width: 180px; max-width: 280px; overflow-wrap: break-word; }
+.lista td.fara-rupere { white-space: nowrap; }
+.eticheta.rece { background: var(--rece-fundal); color: var(--rece); }
+.eticheta.cald { background: var(--cald-fundal); color: var(--cald); }
+:root { --rece-fundal: #dbe9fb; --rece: #14509e; --cald-fundal: #ffe4d0; --cald: #a33f00; }
+@media (prefers-color-scheme: dark) {
+  :root { --rece-fundal: #1b2f4d; --rece: #9bc1f7; --cald-fundal: #4a2a12; --cald: #ffb27a; }
+}
+.bara-detaliu { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 0 0 8px; }
+.inapoi { color: var(--accent); font-weight: 600; }
+.antet-detaliu { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; margin: 0 0 12px; color: var(--slab); }
+.file { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--linie); margin-bottom: 12px; }
+.file button {
+  border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom: 0; background: transparent;
+  min-height: 40px; padding: 8px 12px;
+}
+.file button[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+@media (prefers-color-scheme: dark) { .file button[aria-selected="true"] { color: #111; } }
+.avertisment-bloc {
+  margin: 0 0 10px; padding: 8px 12px; border-radius: 6px; background: var(--galben-fundal); color: var(--galben); font-weight: 600;
+}
+.avertisment-bloc.rosu { background: var(--rosu-fundal); color: var(--rosu); }
+.sectiune { margin: 0 0 18px; }
+.sectiune h3 { font-size: 1rem; margin: 0 0 8px; }
+.stare.lat-dl { grid-template-columns: max-content 1fr; }
+.grup-rand th { background: var(--gri-fundal); color: var(--text); }
+.cartele { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.carte { border: 1px solid var(--linie); border-radius: 8px; padding: 10px; min-width: 0; }
+.carte h3 { margin: 0 0 6px; font-size: .98rem; }
+.carte .tehnic { display: none; color: var(--slab); font-size: .8rem; font-family: ui-monospace, Consolas, monospace; }
+.carte.arata-tehnic .tehnic { display: table-cell; }
+.carte p.tehnic { margin: 0 0 6px; }
+.carte.arata-tehnic p.tehnic { display: block; }
+.carte td.val { text-align: right; font-weight: 600; overflow-wrap: anywhere; }
+.carte button.mic-buton { min-height: 28px; padding: 2px 8px; font-size: .8rem; margin-left: 6px; }
+.eroare-rand.nou { background: var(--rosu-fundal); }
+.eroare-bloc { border: 1px solid var(--linie); border-radius: 8px; padding: 10px; margin: 0 0 10px; }
+.eroare-bloc.nou { border-color: var(--rosu); background: var(--rosu-fundal); }
+.eroare-bloc h4 { margin: 0 0 4px; font-size: .98rem; }
+.eroare-bloc p { margin: 2px 0; }
+details > summary { cursor: pointer; color: var(--accent); margin: 4px 0; }
+pre.text-jurnal {
+  margin: 8px 0 0; max-height: 560px; overflow: auto; padding: 8px; background: var(--fundal);
+  border: 1px solid var(--linie); border-radius: 6px; font: 13px/1.4 ui-monospace, Consolas, monospace;
+  white-space: pre-wrap; word-break: break-word;
+}
+.cale-btn { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cale-btn code { overflow-wrap: anywhere; font-size: .85rem; }
+.nr-mare { font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) {
+  header, main { padding-left: 10px; padding-right: 10px; }
+  .panou { padding: 10px; }
+  .bara-detaliu { flex-wrap: wrap; }
+  .file button { flex: 1 1 auto; }
+  .lista td.nota { max-width: 180px; }
+}
+@media (max-width: 640px) {
+  .lista thead { display: none; }
+  .lista, .lista tbody { display: block; }
+  .lista tr { display: block; padding: 8px 0; border-bottom: 2px solid var(--linie); }
+  .lista td { display: flex; gap: 10px; justify-content: space-between; padding: 2px 4px; border: 0; text-align: right; }
+  .lista td::before { content: attr(data-eticheta); color: var(--slab); text-align: left; flex: none; }
+  .lista td:empty { display: none; }
+  .lista td.nota { max-width: none; min-width: 0; }
+  .lista td.stare-rand:empty { display: none; }
+}
+.stare.lat-dl { grid-template-columns: max-content minmax(0, 1fr); }
+.stare.lat-dl dd { overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .stare.lat-dl { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .stare.lat-dl dt { font-size: .85rem; margin-top: 8px; }
+}

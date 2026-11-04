@@ -141,6 +141,45 @@ class TestWebapp(unittest.TestCase):
     def test_conditie_invalida(self):
         self.assertEqual(self.j("/api/start", {"profil": "eveniment_rapid", "conditie": "fierbinte"})[0], 400)
 
+    def test_pagina_sesiuni_si_navigare(self):
+        for cale, tip in (("/sesiuni.html", "text/html"), ("/sesiuni.js", "application/javascript"),
+                          ("/nume_ro.json", "application/json")):
+            cod, corp, t = self.cere(cale)
+            self.assertEqual(cod, 200, cale)
+            self.assertIn(tip, t)
+        html = self.cere("/sesiuni.html")[1].decode("utf-8")
+        self.assertNotIn("<canvas", html)  # fara grafice in etapa 7
+        for pagina in ("/", "/sesiuni.html"):
+            text = self.cere(pagina)[1].decode("utf-8")
+            self.assertIn('href="/index.html"', text)
+            self.assertIn('href="/sesiuni.html"', text)
+            self.assertIn("Înregistrare", text)
+        # fara CDN si fara resurse externe
+        for cale in ("/sesiuni.html", "/sesiuni.js"):
+            self.assertNotIn("http://", self.cere(cale)[1].decode("utf-8").replace("http://127", ""), cale)
+            self.assertNotIn("https://", self.cere(cale)[1].decode("utf-8"), cale)
+
+    def test_dictionar_nume_ro(self):
+        cod, corp, _ = self.cere("/nume_ro.json")
+        d = json.loads(corp.decode("utf-8"))
+        for cheie in ("coloane", "stat", "joburi", "unitati", "steaguri"):
+            self.assertIn(cheie, d)
+        for alias, v in d["coloane"].items():
+            self.assertTrue(v.get("eticheta"), alias)
+            self.assertIn("unitate_afisata", v, alias)
+            self.assertTrue(v.get("grup"), alias)
+        self.assertEqual(d["coloane"]["rpm"]["eticheta"], "Turație")
+        self.assertEqual(d["coloane"]["sarcina"]["eticheta"], "Sarcina motorului (umplere)")
+        self.assertEqual(d["coloane"]["fr1"]["eticheta"], "Factor lambda banca 1")
+        # fiecare alias din profilele livrate are denumire romaneasca, iar STAT_* din ele are eticheta
+        for nume in profiles.lista(profiles.DIR_PROFILE):
+            profil = profiles.incarca(nume, profiles.DIR_PROFILE)
+            for grup in profil.grupuri:
+                for citire in grup.citiri:
+                    for alias, rezultat in citire.valori.items():
+                        self.assertIn(alias, d["coloane"], f"{nume}: alias fara denumire: {alias}")
+                        self.assertIn(rezultat, d["stat"], f"{nume}: rezultat fara eticheta: {rezultat}")
+
 
 if __name__ == "__main__":
     unittest.main()
