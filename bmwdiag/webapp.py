@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from . import __version__, profiles, sesiuni, sistem
 from .ediabas_client import ECU_IMPLICIT
 from .jurnal import Jurnal
-from .recorder import CONDITII, DIR_DATE, Recorder, _json, citeste_erori, creeaza_sursa
+from .recorder import CONDITII, DIR_DATE, INACTIV_LIVE_S, Recorder, _json, citeste_erori, creeaza_sursa
 
 DIR_STATIC = Path(__file__).resolve().parent / "static"
 FISIERE_STATICE = {"/": ("index.html", "text/html"), "/index.html": ("index.html", "text/html"),
@@ -28,6 +28,7 @@ FISIERE_STATICE = {"/": ("index.html", "text/html"), "/index.html": ("index.html
                    "/sesiuni.js": ("sesiuni.js", "application/javascript"),
                    "/sesiuni_date.js": ("sesiuni_date.js", "application/javascript"),
                    "/fragment.js": ("fragment.js", "application/javascript"),
+                   "/live.html": ("live.html", "text/html"), "/live.js": ("live.js", "application/javascript"),
                    "/comparare.html": ("comparare.html", "text/html"),
                    "/comparare.js": ("comparare.js", "application/javascript"),
                    "/nume_ro.json": ("nume_ro.json", "application/json"),
@@ -41,8 +42,9 @@ class Aplicatie:
     """Starea aplicatiei: un singur recorder activ odata; jurnalul e comun tuturor sesiunilor."""
 
     def __init__(self, sursa_tip: str = "ediabas", dir_date=DIR_DATE, dir_profile=profiles.DIR_PROFILE,
-                 fabrica_sursa=None, ecou=None, fake_tmot: float = 30.0):
+                 fabrica_sursa=None, ecou=None, fake_tmot: float = 30.0, inactiv_live_s: float = INACTIV_LIVE_S):
         self.sursa_tip = sursa_tip
+        self.inactiv_live_s = inactiv_live_s
         self.dir_date = Path(dir_date)
         self.dir_profile = Path(dir_profile)
         self._fabrica = fabrica_sursa or (lambda ecu: creeaza_sursa(sursa_tip, ecu, fake_tmot=fake_tmot))
@@ -58,7 +60,7 @@ class Aplicatie:
         if self.recorder is not None:
             s = self.recorder.stare()
         else:
-            s = {"stare": "oprit", "profil": None, "conditie": None, "sursa": None, "marcaje": [], "timp_s": 0,
+            s = {"stare": "oprit", "mod": None, "profil": None, "conditie": None, "sursa": None, "marcaje": [], "timp_s": 0,
                  "randuri": 0, "cicluri_pe_s": 0, "ultima_reusita_s": None, "erori": 0, "folder": None,
                  "motiv_oprire": None, "steaguri": {}, "valori": {}}
         s.update(activ=self.activ, sursa_tip=self.sursa_tip, avertisment=AVERTISMENT_MCP, versiune=__version__)
@@ -74,10 +76,13 @@ class Aplicatie:
                 rez.append({"nume": nume, "fisier": nume, "eroare": str(e)})
         return rez
 
-    def start(self, profil: str, conditie: str = "necunoscut", nota: str = "") -> tuple[int, dict]:
+    def start(self, profil: str, conditie: str = "necunoscut", nota: str = "", live: bool = False) -> tuple[int, dict]:
+        """live=True: citire fara scriere pe disc (Recorder(scrie=False)); un singur cititor activ odata."""
         with self._lock:
             if self.activ:
-                return 409, {"eroare": "O înregistrare rulează deja. Oprește-o întâi."}
+                if self.recorder.scrie:
+                    return 409, {"eroare": "O înregistrare rulează deja. Oprește-o întâi."}
+                return 409, {"eroare": "O citire live rulează deja. Oprește-o întâi."}
             if conditie not in CONDITII:
                 return 400, {"eroare": f"Condiția trebuie să fie una din: {', '.join(CONDITII)}"}
             try:
@@ -90,16 +95,46 @@ class Aplicatie:
             except Exception as e:  # noqa: BLE001
                 return 500, {"eroare": f"Nu pot crea sursa de date: {e}"}
             self.recorder = Recorder(p, sursa, dir_date=self.dir_date, conditie=conditie, nota=nota,
-                                     jurnal=self.jurnal)
+                                     jurnal=self.jurnal, scrie=not live, inactiv_s=self.inactiv_live_s)
             self.recorder.porneste()
             return 200, {"ok": True}
+
+    def start_live(self, profil: str) -> tuple[int, dict]:
+        return self.start(str(profil), live=True)
+
+    def date_live(self, de_la_ciclu: int, coloane: list[str] | None, de_la_ev: int) -> tuple[int, dict]:
+        """Citirea live (activa sau oprita de curand: bufferul ramane pana la urmatorul start)."""
+        r = self.recorder
+        if r is None or r.scrie:
+            if r is not None and self.activ:
+                return 409, {"eroare": "Rulează o înregistrare, nu o citire live."}
+            return 200, {"stare": "oprit", "mod": None, "activ": False, "t": [], "ciclu": [], "ciclu_ultim": de_la_ciclu,
+                         "reset": False, "evenimente": [], "ev_ultim": de_la_ev, "unitati": {}}
+        try:
+            d = r.date_live(de_la_ciclu, coloane, de_la_ev)
+        except ValueError as e:
+            return 400, {"eroare": str(e)}
+        d["activ"] = self.activ
+        d["profil"] = r.profil.nume
+        d["aliasuri"] = list(r.mapare)
+        return 200, d
+
+    def salveaza_live(self, secunde, conditie: str, nota: str) -> tuple[int, dict]:
+        r = self.recorder
+        if r is None or r.scrie:
+            return 409, {"eroare": "Nu există o citire live de salvat."}
+        try:
+            folder = r.exporta_buffer(secunde, self.dir_date, conditie, nota)
+        except ValueError as e:
+            return 400, {"eroare": str(e)}
+        return 200, {"ok": True, "folder": str(folder), "id": folder.name}
 
     def stop(self) -> tuple[int, dict]:
         with self._lock:
             if not self.activ:
                 return 409, {"eroare": "Nu rulează nicio înregistrare."}
             self.recorder.opreste("oprit din interfață")
-            return 200, {"ok": True, "folder": str(self.recorder.folder)}
+            return 200, {"ok": True, "folder": str(self.recorder.folder) if self.recorder.folder else None}
 
     def marcaj(self, eticheta: str) -> tuple[int, dict]:
         if not self.activ:
@@ -112,6 +147,8 @@ class Aplicatie:
     def erori(self) -> tuple[int, dict]:
         """In timpul inregistrarii: se citesc in bucla, la ciclul urmator. Altfel: sesiune scurta separata."""
         with self._lock:
+            if self.activ and not self.recorder.scrie:
+                return 409, {"eroare": "În modul live nu se citesc erorile. Oprește citirea live întâi."}
             if self.activ:
                 self.recorder.cere_erori()
                 self.jurnal.scrie("Citirea erorilor a fost cerută; se face la ciclul următor.")
@@ -180,6 +217,15 @@ def fa_handler(app: Aplicatie):
                     de_la = 0
                 linii = app.jurnal.de_la(de_la)
                 return self._json(200, {"linii": linii, "ultimul": linii[-1][0] if linii else de_la})
+            if u.path == "/api/live":
+                q = parse_qs(u.query)
+                try:
+                    de_la = int(q.get("de_la_ciclu", ["0"])[0])
+                    de_ev = int(q.get("de_la_ev", ["0"])[0])
+                except ValueError:
+                    return self._json(400, {"eroare": "Parametri numerici invalizi."})
+                cols = [c for c in q.get("coloane", [""])[0].split(",") if c] if "coloane" in q else None
+                return self._json(*app.date_live(de_la, cols, de_ev))
             if u.path == "/api/profile":
                 return self._json(200, app.profile())
             if u.path == "/api/sesiuni" or u.path.startswith("/api/sesiuni/"):
@@ -259,7 +305,11 @@ def fa_handler(app: Aplicatie):
             if u.path == "/api/start":
                 cod, rez = app.start(str(d.get("profil", "")), str(d.get("conditie", "necunoscut")),
                                      str(d.get("nota", "")))
-            elif u.path == "/api/stop":
+            elif u.path == "/api/live/start":
+                cod, rez = app.start_live(d.get("profil", ""))
+            elif u.path == "/api/live/salveaza":
+                cod, rez = app.salveaza_live(d.get("secunde"), str(d.get("conditie", "necunoscut")), str(d.get("nota", "")))
+            elif u.path in ("/api/stop", "/api/live/stop"):
                 cod, rez = app.stop()
             elif u.path == "/api/marcaj":
                 cod, rez = app.marcaj(d.get("eticheta"))

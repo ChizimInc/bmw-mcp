@@ -25,6 +25,9 @@ from .sources import EdiabasSource, FakeSource, ReplaySource, _nume_unitate
 # Folderul de date: variabila de mediu BMW_DATA_DIR sau, implicit, Documents\bmw-data din profilul utilizatorului.
 DIR_DATE = Path(os.environ.get("BMW_DATA_DIR") or (Path.home() / "Documents" / "bmw-data"))
 CONDITII = ("rece", "cald", "necunoscut")
+BUFFER_LIVE_MAX = 6000       # randurile pastrate in memorie in modul live (~15 min la 7 cicluri/s)
+INACTIV_LIVE_S = 60          # fara nicio cerere de la pagina, citirea live se opreste singura
+LIMITA_RANDURI_LIVE = 5000   # cel mult atatea randuri intr-un raspuns /api/live
 PAUZA_FARA_REUSITA_S = 0.5   # nu invartim bucla in gol cand nu raspunde nimic
 CICLURI_PANA_LA_PIERDERE = 3  # cicluri consecutive fara nicio citire reusita -> conexiune_pierduta
 PAUZE_RECONECTARE = (1, 2, 5)  # secunde inainte de fiecare reset(); apoi ramane la ultima
@@ -58,9 +61,20 @@ def citeste_erori(sursa, ecu: str) -> tuple[dict, str, bool]:
 
 class Recorder:
     def __init__(self, profil: profiles.Profil, sursa, dir_date=DIR_DATE, conditie: str = "necunoscut",
-                 nota: str = "", jurnal: Jurnal | None = None, ceas=time.monotonic):
+                 nota: str = "", jurnal: Jurnal | None = None, ceas=time.monotonic, scrie: bool = True,
+                 inactiv_s: float = INACTIV_LIVE_S):
+        """scrie=False: mod LIVE. Aceeasi bucla de citire (garda, reconectare, steaguri), dar nu scrie NIMIC pe disc
+        (fara folder, CSV, sesiune.json, instantaneu sau citiri de erori); randurile stau intr-un buffer circular
+        in memorie si citirea se opreste singura dupa inactiv_s secunde fara cereri la date_live()."""
         if conditie not in CONDITII:
             raise ValueError(f"conditie trebuie sa fie una din {CONDITII}")
+        self.scrie = scrie
+        self.inactiv_s = inactiv_s
+        self.buffer: collections.deque = collections.deque(maxlen=BUFFER_LIVE_MAX)
+        self.evenimente_mem: collections.deque = collections.deque(maxlen=500)   # (nr, t_rel_s, tip, detalii, t_iso)
+        self._nr_ev = 0
+        self._ultima_cerere = None
+        self._text_ok = "inregistreaza" if scrie else "live"
         self.profil = profil
         self.sursa = sursa
         self.dir_date = Path(dir_date)
@@ -138,6 +152,101 @@ class Recorder:
     def activ(self) -> bool:
         return self._fir is not None and self._fir.is_alive()
 
+    # ------------------------------------------------------------ modul live
+    @staticmethod
+    def _numar(x):
+        if isinstance(x, bool):
+            return None
+        if isinstance(x, (int, float)):
+            return x
+        try:
+            return float(x)
+        except (TypeError, ValueError):
+            return None
+
+    def date_live(self, de_la_ciclu: int = 0, coloane: list[str] | None = None, de_la_ev: int = 0) -> dict:
+        """Randurile noi din buffer (ciclu > de_la_ciclu), pe coloane, ca /api/sesiuni/<id>/date: {"t":[...], alias:[...]}
+        cu None pentru celule goale sau netextuale. reset=True: cursorul a iesit din buffer (randuri pierdute).
+        Fiecare apel reinnoieste temporizatorul de inactivitate."""
+        self._ultima_cerere = self._ceas()
+        coloane = list(self.mapare) if coloane is None else coloane
+        for c in coloane:
+            if c not in self.mapare:
+                raise ValueError(f"Coloană necunoscută: {c!r}")
+        with self._lock:
+            noi = []
+            for r in reversed(self.buffer):
+                if r["ciclu"] <= de_la_ciclu:
+                    break
+                noi.append(r)
+            noi.reverse()
+            prima = self.buffer[0]["ciclu"] if self.buffer else 0
+            reset = bool(de_la_ciclu and self.buffer and prima > de_la_ciclu + 1)
+            if len(noi) > LIMITA_RANDURI_LIVE:
+                noi, reset = noi[-LIMITA_RANDURI_LIVE:], True
+            ev = [{"nr": n, "t": t, "tip": tip, "detalii": d} for n, t, tip, d, _ in self.evenimente_mem if n > de_la_ev]
+            ev_ultim = self._nr_ev
+        rez = {"t": [r["t_rel_s"] for r in noi], "ciclu": [r["ciclu"] for r in noi]}
+        for c in coloane:
+            rez[c] = [self._numar(r.get(c)) for r in noi]
+        st = self.stare()
+        rez.update(ciclu_ultim=noi[-1]["ciclu"] if noi else de_la_ciclu, reset=reset, evenimente=ev, ev_ultim=ev_ultim,
+                   marcaj=[r.get("marcaj", "") for r in noi], steaguri=[r.get("steaguri", "") for r in noi],
+                   unitati={a: m["unitate"] for a, m in self.mapare.items()},
+                   **{k: st[k] for k in ("stare", "mod", "timp_s", "cicluri_pe_s", "ultima_reusita_s", "erori",
+                                          "steaguri_total", "motiv_oprire") if k in st})
+        return rez
+
+    def exporta_buffer(self, secunde: float, dir_date=None, conditie: str = "necunoscut", nota: str = "") -> Path:
+        """Salveaza EXPLICIT ultimele `secunde` din buffer ca sesiune normala (singura scriere a modului live).
+        Folosibila si dupa oprirea citirii, cat timp recorderul exista."""
+        if self.scrie:
+            raise ValueError("Exportul se face doar din modul live.")
+        if conditie not in CONDITII:
+            raise ValueError(f"conditia trebuie sa fie una din {CONDITII}")
+        if not (isinstance(secunde, (int, float)) and not isinstance(secunde, bool) and secunde > 0):
+            raise ValueError("Numărul de secunde trebuie să fie pozitiv.")
+        with self._lock:
+            randuri, evenimente = list(self.buffer), list(self.evenimente_mem)
+        if not randuri:
+            raise ValueError("Bufferul live e gol: nu am ce salva.")
+        t_sf = randuri[-1]["t_rel_s"]
+        randuri = [r for r in randuri if r["t_rel_s"] >= t_sf - secunde]
+        t0 = randuri[0]["t_rel_s"]
+        baza = Path(dir_date or self.dir_date) / "sesiuni"
+        nume = f"{datetime.now():%Y-%m-%d_%H%M%S}_{self.profil.nume}_{conditie}"
+        folder, k = baza / nume, 2
+        while folder.exists():
+            folder, k = baza / f"{nume}_{k}", k + 1
+        folder.mkdir(parents=True)
+        with open(folder / "date_001.csv", "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=self.coloane, extrasaction="ignore")
+            w.writeheader()
+            for r in randuri:
+                w.writerow({**r, "t_rel_s": f"{r['t_rel_s'] - t0:.3f}", "ciclu_ms": f"{r['ciclu_ms']:.1f}"})
+        ev_fereastra = [e for e in evenimente if t0 <= e[1] <= t_sf]
+        with open(folder / "evenimente.csv", "w", newline="", encoding="utf-8") as fh:
+            w = csv.writer(fh)
+            w.writerow(["t_iso", "t_rel_s", "tip", "detalii"])
+            w.writerow([randuri[0]["t_iso"], "0.000", "stare",
+                        f"export din citirea live: ultimele {secunde:g} s (profil={self.profil.nume})"])
+            for _, t, tip, detalii, iso in ev_fereastra:
+                w.writerow([iso, f"{t - t0:.3f}", tip, detalii])
+        steaguri = collections.Counter(d.split(":", 1)[0].strip() for _, _, tip, d, _ in ev_fereastra if tip == "steag")
+        durata = t_sf - t0
+        _json(folder / "coloane.json", self.mapare)
+        _json(folder / "sesiune.json", {
+            "versiune_aplicatie": __version__, "profil": self.profil.nume, "profil_toml": self.profil.sursa_toml,
+            "conditie": conditie, "nota": nota, "sursa": type(self.sursa).__name__, "ecu": self.profil.ecu,
+            "start": randuri[0]["t_iso"], "stop": randuri[-1]["t_iso"], "segmente": 1, "randuri": len(randuri),
+            "motiv_oprire": "exportat din citirea live", "origine": "live",
+            "statistici": {"durata_s": round(durata, 2), "cicluri": len(randuri), "randuri": len(randuri), "erori": 0,
+                           "steaguri": dict(steaguri),
+                           "cicluri_pe_s": round(len(randuri) / durata, 3) if durata > 0 else 0, "joburi": {}},
+        })
+        self.jurnal.scrie(f"Salvat din live: ultimele {secunde:g} s ({len(randuri)} rânduri) în {folder}")
+        return folder
+
     def t_rel(self) -> float:
         if self._t_final is not None:
             return self._t_final
@@ -152,14 +261,15 @@ class Recorder:
             else:
                 cps = 0.0
             return {
-                "stare": self.stare_text, "profil": self.profil.nume, "conditie": self.conditie,
+                "stare": self.stare_text, "mod": "inregistrare" if self.scrie else "live",
+                "profil": self.profil.nume, "conditie": self.conditie,
                 "sursa": type(self.sursa).__name__, "marcaje": self.profil.marcaje,
                 "timp_s": round(self.t_rel(), 1), "randuri": self.randuri, "cicluri_pe_s": round(cps, 2),
                 "ultima_reusita_s": None if self._t_ultima_reusita is None
                 else round(acum - self._t_ultima_reusita, 1),
                 "erori": self.erori, "folder": str(self.folder) if self.folder else None,
                 "motiv_oprire": self._motiv_oprire if self.stare_text == "oprit" else None,
-                "steaguri": dict(self.numar_steaguri),
+                "steaguri": dict(self.numar_steaguri), "steaguri_total": sum(self.numar_steaguri.values()),
                 "valori": {a: {"valoare": self.ultimele.get(a), "unitate": self.mapare[a]["unitate"]}
                            for a in self.mapare},
             }
@@ -182,7 +292,7 @@ class Recorder:
         try:
             self._pregateste()
             if not self._oprire.is_set():
-                self.stare_text = "inregistreaza"
+                self.stare_text = self._text_ok
                 self._bucla()
         except Exception as e:  # noqa: BLE001
             self.stare_text = "eroare"
@@ -198,7 +308,20 @@ class Recorder:
     def _pregateste(self):
         self.stare_text = "porneste"
         self._t0 = self._ceas()
+        self._ultima_cerere = self._t0
         self._start_iso = _acum_iso()
+        if not self.scrie:
+            self.jurnal.scrie(f"Citire LIVE (nu se salvează nimic): profil '{self.profil.nume}', "
+                              f"sursa {type(self.sursa).__name__}")
+            if self._fara_somn:
+                self.jurnal.scrie("Laptopul nu va adormi cât timp citești live.")
+            try:
+                self.sursa.start()
+            except Exception as e:  # noqa: BLE001
+                self.jurnal.scrie(f"Nu pot porni sesiunea de citire: {explica(f'{type(e).__name__}: {e}')}", "eroare")
+                self._motiv_oprire = "sesiunea de citire nu a pornit"
+                self._oprire.set()
+            return
         baza = self.dir_date / "sesiuni"
         nume = f"{datetime.now():%Y-%m-%d_%H%M%S}_{self.profil.nume}_{self.conditie}"
         folder, k = baza / nume, 2
@@ -237,15 +360,19 @@ class Recorder:
         ultima_erori = self._ceas()
         while not self._oprire.is_set():
             acum = self._ceas()
-            if p.durata_max_minute and self.t_rel() >= p.durata_max_minute * 60:
+            if not self.scrie:
+                if acum - self._ultima_cerere > self.inactiv_s:
+                    self.opreste(f"inactivitate: nicio cerere de la pagină în {self.inactiv_s:g} s", asteapta=False)
+                    break
+            elif p.durata_max_minute and self.t_rel() >= p.durata_max_minute * 60:
                 self.opreste("durata maximă atinsă", asteapta=False)
                 break
-            if p.segment_minute and acum - self._t_segment >= p.segment_minute * 60:
+            if self.scrie and p.segment_minute and acum - self._t_segment >= p.segment_minute * 60:
                 self._segment_nou()
-            if p.erori_interval_minute and acum - ultima_erori >= p.erori_interval_minute * 60:
+            if self.scrie and p.erori_interval_minute and acum - ultima_erori >= p.erori_interval_minute * 60:
                 self._citeste_erori(f"{self.t_rel():.0f}")
                 ultima_erori = acum
-            if self._erori_cerute:
+            if self._erori_cerute and self.scrie:
                 self._erori_cerute = False
                 self._citeste_erori(f"cerere_{self.t_rel():.0f}")
             self.sursa.ciclu_nou()
@@ -281,7 +408,7 @@ class Recorder:
             rand.update({"t_iso": t_iso, "t_rel_s": f"{t_ciclu - self._t0:.3f}", "ciclu": self.cicluri,
                          "ciclu_ms": f"{ciclu_ms:.1f}", "marcaj": ";".join(marcaje), "steaguri": ";".join(steaguri)})
             self._scrie_rand(rand)
-            if p.cicluri_max and self.cicluri >= p.cicluri_max:
+            if self.scrie and p.cicluri_max and self.cicluri >= p.cicluri_max:
                 self.opreste(f"gata: {p.cicluri_max} cicluri citite", asteapta=False)
                 break
             if self._conexiune_pierduta:
@@ -305,7 +432,7 @@ class Recorder:
             if self._conexiune_pierduta:
                 self._conexiune_pierduta = False
                 self._pas_reconectare = 0
-                self.stare_text = "inregistreaza"
+                self.stare_text = self._text_ok
                 self._steag("conexiune_restabilita", "citirile merg din nou")
             return
         self._cicluri_fara_reusita += 1
@@ -410,6 +537,11 @@ class Recorder:
             self._eveniment("stare", f"segment nou {cale.name}")
 
     def _scrie_rand(self, rand: dict):
+        if not self.scrie:  # live: doar in memorie (sub lock, ca date_live sa vada randuri intregi)
+            with self._lock:
+                self.buffer.append({**rand, "t_rel_s": float(rand["t_rel_s"]), "ciclu_ms": float(rand["ciclu_ms"])})
+                self.randuri += 1
+            return
         self._csv.writerow(rand)
         self._csv_fh.flush()
         acum = self._ceas()
@@ -426,12 +558,16 @@ class Recorder:
             self._csv_fh = self._csv = None
 
     def _eveniment(self, tip: str, detalii: str):
+        with self._lock:
+            self._nr_ev += 1
+            self.evenimente_mem.append((self._nr_ev, round(self.t_rel(), 3), tip, detalii, _acum_iso()))
         if self._ev:
             self._ev.writerow([_acum_iso(), f"{self.t_rel():.3f}", tip, detalii])
             self._ev_fh.flush()
 
     def _scrie_coloane(self):
-        _json(self.folder / "coloane.json", self.mapare)
+        if self.scrie:
+            _json(self.folder / "coloane.json", self.mapare)
 
     def _scrie_sesiune(self, final: bool = False):
         _json(self.folder / "sesiune.json", {
@@ -451,6 +587,17 @@ class Recorder:
         })
 
     def _incheie(self):
+        if not self.scrie:
+            self.stare_text = "opreste"
+            try:
+                self.sursa.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self._motiv_oprire = self._motiv_oprire or "oprit"
+            self._t_final = self.t_rel()
+            self.jurnal.scrie(f"Stop citire live ({self._motiv_oprire}). {self.randuri} rânduri citite, nimic salvat.")
+            self.stare_text = "oprit"
+            return
         if self.folder is None:
             return
         self.stare_text = "opreste"

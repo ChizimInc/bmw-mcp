@@ -8,7 +8,7 @@ Un logger local care înregistrează, fără un asistent AI în buclă, date de 
 
 Cerințe de design (decise):
 
-1. Interfață web locală, în browser. FĂRĂ grafice live pe ecranul de înregistrare: doar jurnal live și stare, ca să se vadă că nu s-a blocat și că se scriu date.
+1. Interfață web locală, în browser. Ecranul de înregistrare NU are grafice: doar jurnal live, stare și ultimele valori, ca să se vadă că nu s-a blocat și că se scriu date. Graficele sunt în paginile Sesiuni (date salvate, secțiunea 13) și Live (citire fără înregistrare, secțiunea 14).
 2. Profile declarative (fișiere TOML), alese din interfață, ca tipul de test să se schimbe fără cod.
 3. Între datele citite trebuie să fie și sarcina motorului (cât de încărcat e motorul acum).
 4. Un profil de lungă durată (pornit la începutul drumului, aproximativ 30 de minute prin oraș).
@@ -33,7 +33,7 @@ Cerințe de design (decise):
   - refuzate (chiar dacă trec mai sus): `LOESCH|SCHREIB|STEUERN|FLASH|PROGRAM|RESET|CODIER.*(SCHREIB|LOESCH)|SET_|WRITE|ERASE|DELETE` (fără diferență de majuscule)
   - Garda se aplică la încărcarea profilului ȘI la fiecare apel. Un profil cu job refuzat nu se încarcă.
 - Nu ștergi erori, nu codezi, nu modifici `C:\EDIABAS` fără acordul explicit al proprietarului.
-- EDIABAS acceptă o singură sesiune pe port. Cât timp rulează loggerul, serverul MCP `bmw-ediabas` (folosit din chat) nu trebuie să citească. Comportamentul la conflict nu a fost testat; presupune conflict și afișează un avertisment clar în interfață și în README.
+- EDIABAS acceptă o singură sesiune pe port. Cât timp rulează loggerul (înregistrare SAU citire live), serverul MCP `bmw-ediabas` (folosit din chat) nu trebuie să citească. Comportamentul la conflict nu a fost testat; presupune conflict și afișează un avertisment clar în interfață și în README.
 - `stdout` nu e folosit pentru protocol aici (spre deosebire de server.py), dar loggerul scrie jurnalul și în fișier.
 - Fără date personale în fișierele partajate: rezultatele `AIF_LESEN` conțin VIN-ul. Se pot salva local în instantaneu, dar nu se pun în rezumate sau în documente de proiect.
 
@@ -170,6 +170,7 @@ Folder nou: `Documents\bmw-data\sesiuni\<AAAA-LL-ZZ_HHMMSS>_<profil>_<rece|cald|
 - `erori_start.json`, `erori_stop.json`, `erori_<t_rel>.json`: rezultatul `FS_LESEN` (și `FS_LESEN_DETAIL` pentru fiecare eroare găsită). La diferență față de start → steag `eroare_noua`.
 - `instantaneu_start.json`: rezultatul joburilor din `instantaneu_la_start`.
 - `jurnal.txt`: tot ce apare în jurnalul din interfață.
+- Sesiunile salvate din citirea live (secțiunea 14, Etapa 13) au doar `sesiune.json` (cu `origine: "live"`), `date_001.csv`, `evenimente.csv` și `coloane.json`; nu au erori, instantaneu, jurnal sau statistici de joburi.
 - La Stop (sau oprire neașteptată, prin `atexit` și tratarea Ctrl+C) se închid fișierele corect și se scrie `sesiune.json` final.
 
 ## 9. Interfața web (în română)
@@ -220,6 +221,7 @@ Etapa 5 – Rezumat în consolă (se face pe `bmwdiag/sesiuni.py`, vezi secțiun
   - Teste: `tests/test_rezumat.py` (sesiune FakeSource, id ostil, un rând, fără `sesiune.json`, JSON valid, nimic modificat pe disc, fum pe datele reale).
 
 Etapele 6–9 (vizualizarea sesiunilor în interfața web): secțiunea 13.
+Etapele 11–13 (citire live, fără înregistrare, în interfața web): secțiunea 14.
 
 ## 11. Analiza datelor
 
@@ -239,7 +241,7 @@ Se face local (notele despre o mașină anume nu sunt în repo). Metoda: sesiuni
 
 O sesiune înseamnă acum un folder cu 8 până la 15 fișiere (`sesiune.json`, `coloane.json`, `date_001.csv`…, `evenimente.csv`, `erori_*.json`, `instantaneu_start.json`, `jurnal.txt`). Proprietarul nu poate citi datele normal: CSV-ul are 30+ coloane cu nume scurte, mii de rânduri (până la ~13.000 la 30 de minute) și multe celule goale (grupurile lente), iar JSON-urile sunt pline de câmpuri tehnice (`_TEL_ANTWORT`, `hex:...`). Vrem o pagină în aplicația existentă unde alegi o sesiune dintr-o listă și o vezi într-un format ușor de citit, în română.
 
-Notă: cerința inițială „FĂRĂ grafice live" (secțiunea 0) rămâne valabilă pentru ecranul de înregistrare. Vizualizarea sesiunilor lucrează pe date SALVATE, deci graficele sunt permise aici.
+Notă: ecranul de înregistrare rămâne fără grafice (secțiunea 0). Vizualizarea sesiunilor lucrează pe date SALVATE, deci graficele sunt permise aici; graficele de citire în timp real stau separat, în pagina Live (secțiunea 14).
 
 ### 13.2 Ce arată datele reale (verificat pe sesiunile reale)
 
@@ -362,3 +364,69 @@ Etapa 10 – Fragment global (slider) și fragmente salvate
   - Efectul pe file: **Rezumat** se recalculează pe server (`/rezumat?de_la&pana_la`; „Joburi citite” și avertismentele rămân pe toată sesiunea, cu notă); **Grafice** cer datele fragmentului la rezoluție completă (max 5000 de puncte doar pe fragment), iar „Vedere de ansamblu”, −, +, ← și → rămân în fragment; **Tabel** aplică filtrul „De la / Până la” în interiorul fragmentului; **Evenimente** și **Erori** arată doar ce cade în fragment (cu numărul celor ascunse; „NOU” la erori rămâne față de citirea de la start). „Vezi în grafice” pe un eveniment din afara fragmentului renunță la fragment.
   - Fragmente salvate cu nume (butonul „Salvează fragmentul”, chip-uri cu aplicare și ștergere cu confirmare), pe sesiune. Se vor putea folosi mai departe la comparare (încă nu).
   - Teste: `test_rezumat_pe_fragment`, `test_fragmente_salvate`, `test_fragmente_date_invalide`, `test_fragmente_fisier_stricat` în `tests/test_sesiuni.py`; `test_fragment_api_si_pagina` în `tests/test_webapp.py`. Verificat în browser pe două sesiuni reale (rece 12.040 rânduri / cald, copiate într-un folder temporar): tragere cu mouse real, tastatură, reîncărcare, salvare/aplicare/ștergere, toate filele, ecran de 375 px (fără scroll orizontal), temă deschisă și închisă.
+
+## 14. Citire live, fără înregistrare (implementat 05.11.2026)
+
+Scop: să vezi valorile și graficele în timp ce mașina merge, FĂRĂ să scrii nimic pe disc. „Live" e un mod de citire separat de înregistrare: nicio sesiune nouă, niciun CSV, niciun `sesiune.json`, niciun instantaneu, nicio citire automată de erori. Datele stau doar în memorie și dispar la următorul Start; singura scriere posibilă e „Salvează", cerută explicit (14.3, Etapa 13). Pagina Live e singura cu grafice în timp real; ecranul de înregistrare rămâne fără grafice (secțiunea 0).
+
+Principii (nu se negociază):
+- DOAR CITIRE, prin aceeași gardă (`bmwdiag/guard.py`) și aceleași joburi ca la înregistrare. Nicio scriere pe mașină.
+- EDIABAS = o singură sesiune pe port: live, înregistrarea și serverul MCP din chat nu citesc în același timp. Aplicația ține un singur recorder activ; cât rulează live, Start de înregistrare, Start live și citirea de erori sunt refuzate cu 409 și mesaj în română (și invers, live e refuzat cât se înregistrează). Blocarea `logger.lock` e pe procesul `bmwdiag.webapp`, deci se aplică la fel; avertismentul despre MCP apare și pe pagina Live.
+- Citirea live se oprește singură după 60 s fără nicio cerere `GET /api/live` (browser închis, calculator adormit) și eliberează portul; Stop o oprește oricând.
+- Nu scrie nimic în `bmw-data`; jurnalul din interfață (conectare, reconectări, marcaje, steaguri) rămâne în memorie.
+- Aceeași reconectare automată, aceleași steaguri și același tratament al erorilor de citire ca la înregistrare: o singură buclă de citit mașina (`Recorder`).
+- Fără internet, fără CDN (uPlot local). Fără mașină se testează cu `FakeSource` și `ReplaySource`. Interfața și mesajele sunt în română.
+
+### 14.1 Ce arată pagina `/live.html`
+
+- Navigare „Înregistrare / Sesiuni / Live / Comparare" în toate paginile. Alegerea profilului (din `profiles/`), butoane Start live / Stop și bannerul „nu se salvează nimic".
+- Stare: etichetă (oprit / pornește / citește live / reconectare / eroare), „ultima citire reușită acum X s" (verde sub 2 s, galben 2–5 s, roșu peste 5 s), cicluri/s, timp scurs, erori de citire, număr de steaguri.
+- Cartele cu valoarea curentă (turație, pedală, sarcină, cuplu, clapetă, temperatura motorului, viteză, tensiune, MAF, avans; doar cele existente în profil), cu etichete și unități din `nume_ro.json`. O mărime dintr-un grup lent, fără valoare în ultimul ciclu, se arată estompat cu ultima valoare citită.
+- Grafice cu presetările din Etapa 8 și ferestre de 30 s / 2 min / 10 min (până se umple fereastra, graficul crește spre dreapta, apoi derulează). „Îngheață graficele" păstrează intervalul și datele afișate cât timp citirea continuă. Linii verticale pentru marcaje (verde, întrerupt), steaguri (galben) și erori.
+- Marcaje: butoanele și tastele din profil; apar ca linii pe grafic, doar în memorie.
+- „După citire": „Salvează" și „Începe înregistrarea" (14.3).
+
+### 14.2 Cum se citește și cum ajung datele în pagină
+
+- **Cititor live:** `Recorder(profil, sursa, scrie=False, inactiv_s=60)`: aceeași buclă ca la înregistrare. În modul live nu se creează folder, CSV, `sesiune.json`, `coloane.json`, instantaneu, citiri de erori, segmente, `evenimente.csv` sau `jurnal.txt`. Limitele profilului (`durata_max_minute`, `cicluri_max`) se ignoră. Starea e `live`, iar `stare()` are câmpul `mod` (`live` / `inregistrare`). Anti-somnul rămâne activ cât timp se citește.
+- **Buffer în memorie:** `deque(maxlen=6000)` de rânduri cu valori numerice (≈15 min la 7 cicluri/s; la profile mai rapide acoperă mai puțin) și până la 500 de evenimente (marcaj, steag, eroare), umplute în firul cititorului sub un lock scurt. Rămâne disponibil și după oprire, până la următorul Start.
+- **API (JSON):**
+  - `POST /api/live/start {profil}` și `POST /api/live/stop` (la fel ca `/api/stop`, dar fără `folder`).
+  - `GET /api/live?de_la_ciclu=N&de_la_ev=M&coloane=a,b` → rândurile cu `ciclu > N`, pe coloane, ca la `/date`: `t`, `ciclu`, câte un alias (număr sau `null`), `marcaj`, `steaguri`; plus `ciclu_ultim`, `reset`, `evenimente` (cu `nr > M`, `{nr, t, tip, detalii}`), `ev_ultim`, `unitati`, `aliasuri`, `profil`, `activ`, `stare`, `mod`, `timp_s`, `cicluri_pe_s`, `ultima_reusita_s`, `erori`, `steaguri_total`, `motiv_oprire`. Fără `coloane` vin toate coloanele profilului. `reset=true` înseamnă că cursorul a ieșit din buffer sau s-au cerut peste 5000 de rânduri (clientul își reface datele). Fiecare apel reînnoiește temporizatorul de inactivitate. Fără nicio citire live: 200 cu `stare: "oprit"` și liste goale. 400 la parametri invalizi sau coloană necunoscută; 409 dacă rulează o înregistrare.
+  - `POST /api/live/salveaza {secunde, conditie, nota}` (14.3, Etapa 13).
+- **Transport:** interogare periodică la 0,7 s cât citește (2,5 s când e oprită). Fluxul SSE nu a fost necesar.
+
+### 14.3 Etape
+
+Etapa 11 – Cititor live și API
+- Modul de citire fără scriere, cu buffer circular, blocare comună cu înregistrarea, oprire automată la inactivitate și rutele din 14.2.
+- Criteriu: cu `fake`, `/api/live` întoarce rânduri noi la fiecare cerere, fără goluri și fără dubluri între cereri consecutive; după o rulare live, `bmw-data` nu conține fișiere noi; Start de înregistrare în timpul live (și invers) e refuzat clar; după 60 s fără cereri citirea se oprește și portul e liber; testele existente și cele noi trec.
+- Realizat (05.11.2026). Decizia din 14.2: `Recorder` cu parametrul `scrie=False` (o singură bucla de citire; `scrie=True` rămâne implicit și neschimbat). Detalii:
+  - `bmwdiag/recorder.py`: `Recorder(..., scrie=False, inactiv_s=60)`. În modul live `_pregateste` doar pornește sursa; nu există folder, CSV, `sesiune.json`, `coloane.json`, instantaneu, citiri de erori, segmente, `jurnal.txt` sau `evenimente.csv`. Limitele profilului (`durata_max_minute`, `cicluri_max`) se ignoră. Bufferul e un `deque(maxlen=6000)` de rânduri cu valori numerice (≈15 min la 7 cicluri/s), plus până la 500 de evenimente (marcaj, steag, eroare) în memorie. `_incheie` are o ramură separată pentru live (oprește sursa, nu scrie nimic). Starea nouă `live`, iar `stare()` are câmpul `mod` (`live` / `inregistrare`).
+  - `date_live(de_la_ciclu, coloane, de_la_ev)` întoarce rândurile cu `ciclu > de_la_ciclu` pe coloane (`t`, `ciclu`, un alias pe coloană, `null` pentru celule goale sau netextuale), `reset=true` dacă cursorul a ieșit din buffer sau s-au cerut peste 5000 de rânduri, evenimentele noi, `unitati`, `stare`, `cicluri_pe_s`, `ultima_reusita_s`. Fiecare apel reînnoiește temporizatorul de inactivitate; după `inactiv_s` fără apel citirea se oprește singură cu motivul „inactivitate”.
+  - `bmwdiag/webapp.py`: `Aplicatie.start(..., live=True)` / `start_live`; același slot `recorder` ca la înregistrare, deci excluderea e automată (409 cu mesaj care spune ce rulează). Citirea erorilor în timpul live dă 409. `GET /api/live` (după oprire întoarce bufferul rămas, cu `activ=false`), `POST /api/live/start`, `POST /api/live/stop` și `POST /api/live/salveaza`; formatul complet e în 14.2.
+  - Teste: `tests/test_live.py` (nimic pe disc, cursor fără goluri sau dubluri, reset, valori numerice, oprire la inactivitate, marcaje și ignorarea `cicluri_max`, export) și `test_live_api_fara_scriere_si_excludere`, `test_live_se_opreste_singur_fara_cereri` în `tests/test_webapp.py`.
+
+Etapa 12 – Pagina `/live.html`
+- Cartele, grafic derulant cu uPlot local, îngheț, marcaje și steaguri pe ecran, navigare între pagini.
+- Criteriu: cu `fake`, valorile se mișcă și graficul derulează 30 de minute fără acumulare de memorie; închiderea paginii oprește citirea după timeout, iar redeschiderea nu pornește nimic singură; funcționează fără internet și pe ecran îngust (375 px); verificat în browser.
+- Realizat (05.11.2026). Fișiere: `static/live.html`, `static/live.js`, rute statice `/live.html` și `/live.js`, link „Live” în navigarea tuturor paginilor, stiluri `.cv` / `.cartele-live` în `style.css`. Detalii:
+  - Alegere profil, Start live / Stop, banner „nu se salvează nimic” și avertismentul despre MCP. Interogare la 0,7 s cât citește (2,5 s când e oprită). Reîncărcarea paginii reia din bufferul serverului (nu pornește nimic singură). Dacă rulează o înregistrare, pagina arată mesajul 409.
+  - Cartele cu valoarea curentă (turație, pedală, sarcină, cuplu, clapetă, temperatura motorului, viteză, tensiune, MAF, avans), cu etichete și unități din `nume_ro.json`; un grup lent (fără valoare în ultimul ciclu) se arată estompat cu ultima valoare citită. Indicator de prospețime verde / galben / roșu, cicluri/s, erori, steaguri.
+  - Grafice cu presetările din Etapa 8, fereastră de 30 s / 2 min / 10 min (până se umple, graficul crește spre dreapta), linii verticale pentru marcaje și steaguri. „Îngheață graficele” păstrează intervalul și datele (copii) cât citirea continuă. Marcaje cu butoane și tastele din profil. Clientul păstrează ~11 min și taie în blocuri.
+  - În ecranul Înregistrare, o citire live apare ca „citire live (nu se salvează)”, iar Start rămâne dezactivat.
+  - Verificat în browser cu `fake` (server de test pe alt port, folder de date temporar): Start, valori și grafice în mișcare, reîncărcare cu reluare, tasta 1 ca marcaj, îngheț, ferestre, oprire automată după 60 s fără cereri, 375 px fără scroll orizontal, nimic scris în folderul de date. Neverificat încă: rulare de 30 de minute și măsurarea ciclurilor/s live față de înregistrare pe mașina reală.
+
+Etapa 13 – Din live în înregistrare și salvare explicită
+- „Începe înregistrarea" oprește live și pornește înregistrarea cu același profil; „Salvează ultimele N secunde" exportă bufferul ca sesiune, doar la cerere.
+- Criteriu: trecerea din live în înregistrare nu strică datele și nu lasă portul blocat; sesiunea salvată se deschide în pagina Sesiuni.
+- Realizat (05.11.2026). Decizia din 14.4: la „Începe înregistrarea" datele deja citite NU intră în înregistrare (se oprește live, apoi pornește o înregistrare nouă, cu o scurtă întrerupere la reconectare; confirmare în pagină); cine vrea să le păstreze le salvează întâi. Detalii:
+  - `Recorder.exporta_buffer(secunde, dir_date, conditie, nota)` și `POST /api/live/salveaza {secunde, conditie, nota}`: scrie o sesiune normală (`date_001.csv` cu `t_rel_s` de la 0, `evenimente.csv` cu marcajele și steagurile din fereastră, `coloane.json`, `sesiune.json` cu `origine: "live"` și `motiv_oprire: "exportat din citirea live"`). Merge și după oprirea citirii, cât timp recorderul există (până la următorul Start). 400 la secunde nepozitive, condiție invalidă sau buffer gol; 409 dacă nu e o citire live. Este singura scriere a modului live.
+  - În pagină: secțiunea „După citire” cu „Salvează” (link „Deschide sesiunea”) și „Oprește live și începe înregistrarea” (apoi trece la ecranul Înregistrare). Sesiunea salvată se deschide în Sesiuni cu grafice, rezumat și slider de fragment ca orice sesiune.
+  - Teste: `test_exporta_buffer_ca_sesiune`, `test_export_doar_din_live_si_buffer_gol` și partea de salvare din testul API.
+
+### 14.4 Decizii luate la implementare
+
+- Cartelele implicite sunt o listă fixă în `live.js` (cele din 14.1, doar cele existente în profil); nu s-a adăugat un câmp nou în TOML.
+- Bufferul are 6000 de rânduri (≈15 min la 7 cicluri/s); la profile mai rapide acoperă mai puțin timp.
+- „Începe înregistrarea” pornește de la zero (vezi Etapa 13); modul „doar live” fără scriere este chiar modul implicit al paginii Live.

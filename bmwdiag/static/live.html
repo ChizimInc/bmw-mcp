@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="ro">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live – Logger BMW E90</title>
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="vendor/uPlot.min.css">
+</head>
+<body>
+<header>
+  <nav class="nav" aria-label="Navigare">
+    <a href="/index.html">Înregistrare</a>
+    <a href="/sesiuni.html">Sesiuni</a>
+    <a href="/live.html" aria-current="page">Live</a>
+    <a href="/comparare.html">Comparare</a>
+  </nav>
+  <h1>Citire live <span class="mic">(doar citire; nu se salvează nimic)</span></h1>
+  <p class="avertisment" id="avertisment">Cât citești live, nu folosi serverul MCP din chat. Nimic nu se scrie pe disc, decât dacă salvezi explicit.</p>
+</header>
+
+<main class="pagina">
+  <p class="mesaj eroare" id="eroare-pagina" role="alert" hidden></p>
+
+  <section class="panou" aria-labelledby="t-control">
+    <h2 id="t-control">Citirea</h2>
+    <div class="filtre">
+      <label>Profil <select id="profil"></select></label>
+      <button type="button" id="start">Start live</button>
+      <button type="button" id="stop" disabled>Stop</button>
+    </div>
+    <p class="mic" id="descriere-profil"></p>
+    <dl class="stare" id="stare-live">
+      <dt>Stare</dt><dd><span id="s-stare" class="eticheta">oprit</span></dd>
+      <dt>Ultima citire reușită</dt><dd><span id="s-ultima" class="eticheta">–</span></dd>
+      <dt>Cicluri pe secundă</dt><dd id="s-cps">–</dd>
+      <dt>Timp scurs</dt><dd id="s-timp">–</dd>
+      <dt>Erori de citire</dt><dd id="s-erori">–</dd>
+      <dt>Steaguri</dt><dd id="s-steaguri">–</dd>
+    </dl>
+    <div id="marcaje" class="marcaje" role="group" aria-label="Marcaje (tastele 1–9)"></div>
+  </section>
+
+  <section class="panou" aria-labelledby="t-valori">
+    <h2 id="t-valori">Valori curente</h2>
+    <div class="cartele-live" id="cartele"><p class="gol">Pornește citirea live ca să vezi valorile.</p></div>
+  </section>
+
+  <section class="panou" aria-labelledby="t-grafice">
+    <h2 id="t-grafice">Grafice</h2>
+    <div class="bara-grafice">
+      <fieldset id="presetari"><legend>Grafice afișate</legend></fieldset>
+      <fieldset><legend>Fereastra</legend>
+        <label><input type="radio" name="fereastra" value="30" checked> 30 s</label>
+        <label><input type="radio" name="fereastra" value="120"> 2 min</label>
+        <label><input type="radio" name="fereastra" value="600"> 10 min</label>
+      </fieldset>
+      <button type="button" id="ingheata" aria-pressed="false">Îngheață graficele</button>
+    </div>
+    <p class="mic" id="info-grafice" role="status"></p>
+    <div id="zona-grafice"></div>
+  </section>
+
+  <section class="panou" aria-labelledby="t-salveaza">
+    <h2 id="t-salveaza">După citire</h2>
+    <details>
+      <summary>Salvează ultimele secunde ca sesiune (singura scriere, doar la cererea ta)</summary>
+      <div class="filtre">
+        <label>Secunde <input type="number" id="sv-secunde" min="1" max="3600" value="60"></label>
+        <label>Condiție
+          <select id="sv-conditie"><option value="necunoscut">necunoscut</option><option value="rece">rece</option><option value="cald">cald</option></select>
+        </label>
+        <label>Notă <input type="text" id="sv-nota" maxlength="200" placeholder="opțional"></label>
+        <button type="button" id="sv-buton" disabled>Salvează</button>
+      </div>
+      <p class="mic" id="sv-mesaj" role="status"></p>
+    </details>
+    <details>
+      <summary>Începe înregistrarea cu același profil</summary>
+      <p class="mic">Citirea live se oprește și pornește o înregistrare nouă; datele deja citite în live nu intră în ea (apare o scurtă întrerupere la reconectare). Dacă vrei să le păstrezi, salvează-le întâi.</p>
+      <div class="filtre">
+        <label>Condiție
+          <select id="in-conditie"><option value="necunoscut">necunoscut</option><option value="rece">rece</option><option value="cald">cald</option></select>
+        </label>
+        <label>Notă <input type="text" id="in-nota" maxlength="200" placeholder="opțional"></label>
+        <button type="button" id="in-buton" disabled>Oprește live și începe înregistrarea</button>
+      </div>
+      <p class="mic" id="in-mesaj" role="status"></p>
+    </details>
+  </section>
+</main>
+<script src="vendor/uPlot.iife.min.js"></script>
+<script src="live.js"></script>
+</body>
+</html>

@@ -4,7 +4,7 @@
 const $ = (id) => document.getElementById(id);
 const NUME_STARE = {
   oprit: "oprit", porneste: "pornește", inregistreaza: "înregistrează",
-  opreste: "se oprește", reconectare: "reconectare", eroare: "eroare",
+  opreste: "se oprește", reconectare: "reconectare", eroare: "eroare", live: "citire live (nu se salvează)",
 };
 let profile = [];
 let ultimulJurnal = 0;
@@ -97,7 +97,7 @@ function afiseazaStare(s) {
   $("conexiune").hidden = true;
   const st = $("s-stare");
   st.textContent = NUME_STARE[s.stare] || s.stare;
-  st.className = "eticheta " + ({ inregistreaza: "verde", porneste: "galben", opreste: "galben",
+  st.className = "eticheta " + ({ inregistreaza: "verde", live: "verde", porneste: "galben", opreste: "galben",
     reconectare: "galben", eroare: "rosu" }[s.stare] || "");
   if (s.stare === "oprit" && s.motiv_oprire) st.textContent += ` (${s.motiv_oprire})`;
 
@@ -118,7 +118,7 @@ function afiseazaStare(s) {
   $("s-erori").textContent = s.erori;
   const steaguri = Object.entries(s.steaguri || {});
   $("s-steaguri").textContent = steaguri.length ? steaguri.map(([n, k]) => `${n}: ${k}`).join(", ") : "niciunul";
-  $("s-folder").textContent = s.folder || "–";
+  $("s-folder").textContent = s.mod === "live" && s.activ ? "– (citire live: nu se salvează nimic; se oprește din pagina Live)" : (s.folder || "–");
   $("avertisment").textContent = s.avertisment;
 
   $("start").disabled = s.activ;

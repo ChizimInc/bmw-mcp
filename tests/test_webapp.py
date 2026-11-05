@@ -231,6 +231,57 @@ class TestWebapp(unittest.TestCase):
         self.assertEqual(self.j(f"/api/sesiuni/{id_}/fragmente/f9/sterge", {})[0], 404)
         self.assertEqual(self.j(f"/api/sesiuni/{id_}/fragmente/f1/sterge", {}), (200, []))
 
+    def test_live_api_fara_scriere_si_excludere(self):
+        for f in ("/live.html", "/live.js"):
+            self.assertEqual(self.cere(f)[0], 200, f)
+        cod, st = self.j("/api/live")
+        self.assertEqual((cod, st["stare"], st["activ"]), (200, "oprit", False))
+        self.assertEqual(self.j("/api/live/start", {"profil": "inexistent"})[0], 400)
+        self.assertEqual(self.j("/api/live/start", {"profil": "eveniment_rapid"}), (200, {"ok": True}))
+        self.assertEqual(self.j("/api/stare")[1]["mod"], "live")
+        # un singur cititor: nici inregistrare, nici alt live, nici citirea de erori in timpul live
+        self.assertEqual(self.j("/api/start", {"profil": "eveniment_rapid"})[0], 409)
+        self.assertIn("live", self.j("/api/start", {"profil": "eveniment_rapid"})[1]["eroare"])
+        self.assertEqual(self.j("/api/live/start", {"profil": "eveniment_rapid"})[0], 409)
+        self.assertEqual(self.j("/api/erori", {})[0], 409)
+        time.sleep(0.8)
+        self.assertEqual(self.j("/api/marcaj", {"eticheta": "x"})[0], 200)
+        cod, d1 = self.j("/api/live?coloane=rpm,tmot")
+        self.assertEqual(cod, 200)
+        self.assertEqual(sorted(k for k in ("t", "rpm", "tmot", "ciclu") if k in d1), ["ciclu", "rpm", "t", "tmot"])
+        time.sleep(0.5)
+        cod, d2 = self.j(f"/api/live?coloane=rpm&de_la_ciclu={d1['ciclu_ultim']}&de_la_ev=0")
+        self.assertEqual(cod, 200)
+        self.assertTrue(all(c > d1["ciclu_ultim"] for c in d2["ciclu"]))
+        self.assertTrue(any(e["tip"] == "marcaj" for e in d2["evenimente"]))
+        self.assertEqual(self.j("/api/live?coloane=nu_exista")[0], 400)
+        self.assertEqual(self.j("/api/live?de_la_ciclu=abc")[0], 400)
+        cod, r = self.j("/api/live/stop", {})
+        self.assertEqual((cod, r["ok"], r["folder"]), (200, True, None))
+        self.assertFalse((self.app.dir_date / "sesiuni").exists())  # nimic scris
+        # dupa stop bufferul ramane pentru "Salveaza"; apoi inregistrarea normala merge
+        cod, d3 = self.j("/api/live")
+        self.assertEqual((cod, d3["activ"]), (200, False))
+        self.assertGreater(len(d3["t"]), 3)
+        self.assertEqual(self.j("/api/live/salveaza", {"secunde": 30, "conditie": "cald", "nota": "n"})[0], 200)
+        self.assertEqual(len(self.j("/api/sesiuni")[1]), 1)
+        self.assertEqual(self.j("/api/live/salveaza", {"secunde": 0})[0], 400)
+        self.assertEqual(self.j("/api/start", {"profil": "eveniment_rapid"})[0], 200)
+        self.assertEqual(self.j("/api/live/start", {"profil": "eveniment_rapid"})[0], 409)
+        self.assertEqual(self.j("/api/live")[0], 409)  # ruleaza o inregistrare, nu un live
+        self.assertEqual(self.j("/api/live/salveaza", {"secunde": 5})[0], 409)
+        self.j("/api/stop", {})
+
+    def test_live_se_opreste_singur_fara_cereri(self):
+        self.app.inactiv_live_s = 0.7
+        self.assertEqual(self.j("/api/live/start", {"profil": "eveniment_rapid"})[0], 200)
+        time.sleep(2.0)
+        st = self.j("/api/stare")[1]
+        self.assertFalse(st["activ"])
+        self.assertIn("inactivitate", st["motiv_oprire"])
+        self.assertEqual(self.j("/api/live/start", {"profil": "eveniment_rapid"})[0], 200)  # portul e liber
+        self.j("/api/live/stop", {})
+
     def test_dictionar_nume_ro(self):
         cod, corp, _ = self.cere("/nume_ro.json")
         d = json.loads(corp.decode("utf-8"))

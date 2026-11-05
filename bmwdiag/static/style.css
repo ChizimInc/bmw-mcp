@@ -378,3 +378,15 @@ pre.text-jurnal {
 @media (prefers-color-scheme: dark) { .fr-chip.activ button:first-child { color: #111; } }
 .fragment-info { margin-top: 0; }
 @media (max-width: 640px) { .fr-pista { height: 52px; } .fr-sus button { margin-left: 0; } }
+
+/* --- Pagina „Live” (Etapele 11–13) --- */
+.cartele-live { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.cartele-live .gol { grid-column: 1 / -1; }
+.cv { border: 1px solid var(--linie); border-radius: 8px; padding: 8px 10px; background: var(--fundal); min-width: 0; }
+.cv .et { font-size: .8rem; color: var(--slab); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv .val { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.cv .un { font-size: .8rem; color: var(--slab); margin-left: 4px; font-weight: normal; }
+.cv.vechi .val { opacity: .5; }
+.marcaje { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+#zona-grafice .card-grafic { margin-bottom: 10px; }
+.live-ingheta { outline: 2px solid var(--galben); }
