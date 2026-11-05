@@ -13,11 +13,12 @@ import os
 import sys
 import threading
 import time
-from dataclasses import asdict
+import re
+from dataclasses import asdict, replace
 from datetime import datetime
 from pathlib import Path
 
-from . import __version__, flags, profiles, sistem
+from . import __version__, flags, guard, profiles, sistem
 from .jurnal import Jurnal
 from .mesaje import explica
 from .sources import EdiabasSource, FakeSource, ReplaySource, _nume_unitate
@@ -28,6 +29,14 @@ CONDITII = ("rece", "cald", "necunoscut")
 BUFFER_LIVE_MAX = 6000       # randurile pastrate in memorie in modul live (~15 min la 7 cicluri/s)
 INACTIV_LIVE_S = 60          # fara nicio cerere de la pagina, citirea live se opreste singura
 LIMITA_RANDURI_LIVE = 5000   # cel mult atatea randuri intr-un raspuns /api/live
+# Folosita doar daca SGBD-ul nu da lista de joburi (_JOBS): joburile STATUS_* citite cu succes pe masina (28 de joburi,
+# vezi profiles/instantaneu_complet.toml).
+JOBURI_STATUS_CUNOSCUTE = (
+    "STATUS_MESSWERTE", "STATUS_FASTA1", "STATUS_FASTA2", "STATUS_LAUFUNRUHE", "STATUS_FUNKTIONSSTATI", "STATUS_L_SONDE",
+    "STATUS_L_SONDE_2", "STATUS_L_SONDE_H", "STATUS_L_SONDE_2_H", "STATUS_GEMISCH", "STATUS_VVT",
+    "STATUS_GEBERRAD_ADAPTION", "STATUS_READINESS", "STATUS_MOTORDREHZAHL", "STATUS_MOTORTEMPERATUR",
+    "STATUS_AN_LUFTTEMPERATUR", "STATUS_UBATT", "STATUS_LMM_MASSE", "STATUS_PWG_POTI_SPANNUNG", "STATUS_LLABG",
+    "STATUS_DKHFM", "STATUS_SAUGROHR", "STATUS_SYSTEMCHECK_KAT", "STATUS_SYSTEMCHECK_LAMBDA_AUS")
 PAUZA_FARA_REUSITA_S = 0.5   # nu invartim bucla in gol cand nu raspunde nimic
 CICLURI_PANA_LA_PIERDERE = 3  # cicluri consecutive fara nicio citire reusita -> conexiune_pierduta
 PAUZE_RECONECTARE = (1, 2, 5)  # secunde inainte de fiecare reset(); apoi ramane la ultima
@@ -68,8 +77,15 @@ class Recorder:
         in memorie si citirea se opreste singura dupa inactiv_s secunde fara cereri la date_live()."""
         if conditie not in CONDITII:
             raise ValueError(f"conditie trebuie sa fie una din {CONDITII}")
+        if scrie and profil.toate_senzorii:
+            raise ValueError(f"Profilul '{profil.nume}' (toate_senzorii) e doar pentru citirea live: "
+                             "coloanele CSV ale unei înregistrări sunt fixe.")
         self.scrie = scrie
         self.inactiv_s = inactiv_s
+        self._grupuri = profil.grupuri          # cu toate_senzorii se inlocuieste la pornire (vezi _descopera)
+        self._rot: dict[str, int] = {}          # grup rotativ -> urmatoarea citire
+        self._dezactivate: set[str] = set()     # joburi care raspund cu eroare ECU: sarite pana la urmatorul Start
+        self._v_mapare = 0                      # creste cand apare o coloana noua (aliasuri automate)
         self.buffer: collections.deque = collections.deque(maxlen=BUFFER_LIVE_MAX)
         self.evenimente_mem: collections.deque = collections.deque(maxlen=500)   # (nr, t_rel_s, tip, detalii, t_iso)
         self._nr_ev = 0
@@ -164,12 +180,15 @@ class Recorder:
         except (TypeError, ValueError):
             return None
 
-    def date_live(self, de_la_ciclu: int = 0, coloane: list[str] | None = None, de_la_ev: int = 0) -> dict:
+    def date_live(self, de_la_ciclu: int = 0, coloane: list[str] | None = None, de_la_ev: int = 0,
+                  de_la_mapare: int = -1) -> dict:
         """Randurile noi din buffer (ciclu > de_la_ciclu), pe coloane, ca /api/sesiuni/<id>/date: {"t":[...], alias:[...]}
         cu None pentru celule goale sau netextuale. reset=True: cursorul a iesit din buffer (randuri pierdute).
         Fiecare apel reinnoieste temporizatorul de inactivitate."""
         self._ultima_cerere = self._ceas()
-        coloane = list(self.mapare) if coloane is None else coloane
+        with self._lock:
+            cunoscute = list(self.mapare)
+        coloane = cunoscute if coloane is None else coloane
         for c in coloane:
             if c not in self.mapare:
                 raise ValueError(f"Coloană necunoscută: {c!r}")
@@ -186,13 +205,20 @@ class Recorder:
                 noi, reset = noi[-LIMITA_RANDURI_LIVE:], True
             ev = [{"nr": n, "t": t, "tip": tip, "detalii": d} for n, t, tip, d, _ in self.evenimente_mem if n > de_la_ev]
             ev_ultim = self._nr_ev
+            v_mapare = self._v_mapare
+            mapare = {a: dict(m) for a, m in self.mapare.items()} if de_la_mapare != v_mapare else None
+            valori = dict(self.ultimele)
         rez = {"t": [r["t_rel_s"] for r in noi], "ciclu": [r["ciclu"] for r in noi]}
         for c in coloane:
             rez[c] = [self._numar(r.get(c)) for r in noi]
+        if mapare is not None:  # trimise doar cand s-au schimbat (pot fi sute de coloane cu toate_senzorii)
+            rez["mapare"] = mapare
+            rez["aliasuri"] = list(mapare)
+            rez["unitati"] = {a: m["unitate"] for a, m in mapare.items()}
         st = self.stare()
         rez.update(ciclu_ultim=noi[-1]["ciclu"] if noi else de_la_ciclu, reset=reset, evenimente=ev, ev_ultim=ev_ultim,
                    marcaj=[r.get("marcaj", "") for r in noi], steaguri=[r.get("steaguri", "") for r in noi],
-                   unitati={a: m["unitate"] for a, m in self.mapare.items()},
+                   valori=valori, v_mapare=v_mapare,
                    **{k: st[k] for k in ("stare", "mod", "timp_s", "cicluri_pe_s", "ultima_reusita_s", "erori",
                                           "steaguri_total", "motiv_oprire") if k in st})
         return rez
@@ -208,6 +234,7 @@ class Recorder:
             raise ValueError("Numărul de secunde trebuie să fie pozitiv.")
         with self._lock:
             randuri, evenimente = list(self.buffer), list(self.evenimente_mem)
+            mapare = {a: dict(m) for a, m in self.mapare.items()}
         if not randuri:
             raise ValueError("Bufferul live e gol: nu am ce salva.")
         t_sf = randuri[-1]["t_rel_s"]
@@ -220,7 +247,8 @@ class Recorder:
             folder, k = baza / f"{nume}_{k}", k + 1
         folder.mkdir(parents=True)
         with open(folder / "date_001.csv", "w", newline="", encoding="utf-8") as fh:
-            w = csv.DictWriter(fh, fieldnames=self.coloane, extrasaction="ignore")
+            campuri = ["t_iso", "t_rel_s", "ciclu", "ciclu_ms"] + list(mapare) + ["marcaj", "steaguri"]
+            w = csv.DictWriter(fh, fieldnames=campuri, extrasaction="ignore")
             w.writeheader()
             for r in randuri:
                 w.writerow({**r, "t_rel_s": f"{r['t_rel_s'] - t0:.3f}", "ciclu_ms": f"{r['ciclu_ms']:.1f}"})
@@ -234,7 +262,7 @@ class Recorder:
                 w.writerow([iso, f"{t - t0:.3f}", tip, detalii])
         steaguri = collections.Counter(d.split(":", 1)[0].strip() for _, _, tip, d, _ in ev_fereastra if tip == "steag")
         durata = t_sf - t0
-        _json(folder / "coloane.json", self.mapare)
+        _json(folder / "coloane.json", mapare)
         _json(folder / "sesiune.json", {
             "versiune_aplicatie": __version__, "profil": self.profil.nume, "profil_toml": self.profil.sursa_toml,
             "conditie": conditie, "nota": nota, "sursa": type(self.sursa).__name__, "ecu": self.profil.ecu,
@@ -321,6 +349,12 @@ class Recorder:
                 self.jurnal.scrie(f"Nu pot porni sesiunea de citire: {explica(f'{type(e).__name__}: {e}')}", "eroare")
                 self._motiv_oprire = "sesiunea de citire nu a pornit"
                 self._oprire.set()
+                return
+            if self.profil.toate_senzorii:
+                try:
+                    self._descopera()
+                except Exception as e:  # noqa: BLE001
+                    self.jurnal.scrie(f"Descoperirea joburilor a eșuat: {type(e).__name__}: {e}", "eroare")
             return
         baza = self.dir_date / "sesiuni"
         nume = f"{datetime.now():%Y-%m-%d_%H%M%S}_{self.profil.nume}_{self.conditie}"
@@ -382,11 +416,19 @@ class Recorder:
             t_ciclu = self._ceas()
             t_iso = _acum_iso()
             rand, reusite = {}, 0
-            for g in p.grupuri:
+            for g in self._grupuri:
                 ult = ultima_grup.get(g.nume)
                 if ult is not None and g.la_fiecare_s > 0 and t_ciclu - ult < g.la_fiecare_s:
                     continue
                 ultima_grup[g.nume] = t_ciclu
+                if g.rotativ:  # o singura citire din grup pe ciclu, pe rand (sarind joburile dezactivate)
+                    for _ in range(len(g.citiri)):
+                        i = self._rot.get(g.nume, 0) % len(g.citiri)
+                        self._rot[g.nume] = i + 1
+                        if g.citiri[i].job not in self._dezactivate:
+                            reusite += self._citeste(g.citiri[i], rand)
+                            break
+                    continue
                 for c in g.citiri:
                     reusite += self._citeste(c, rand)
             ciclu_ms = (self._ceas() - t_ciclu) * 1000
@@ -454,10 +496,66 @@ class Recorder:
             self.jurnal.scrie(f"Reconectare eșuată (încercarea {self._pas_reconectare}): "
                               f"{explica(f'{type(e).__name__}: {e}')}", "eroare")
 
+    def _descopera(self):
+        """Doar live, profil cu toate_senzorii: afla din SGBD joburile STATUS_* (jobul de descriere _JOBS nu comunica
+        cu calculatorul), sare peste cele care cer argumente (_ARGUMENTS) si le citeste pe rand, cate unul pe ciclu."""
+        ecu = self.profil.ecu
+        r = self.sursa.run("_JOBS", ecu=ecu)
+        nume = [str(x["JOBNAME"]) for x in r.seturi if "JOBNAME" in x]
+        if not nume:
+            self.jurnal.scrie(f"Nu pot afla lista de joburi din SGBD ({explica(r.eroare or 'răspuns gol')}); "
+                              "folosesc joburile STATUS_* cunoscute.", "avertisment")
+            nume = list(JOBURI_STATUS_CUNOSCUTE)
+        status = sorted({n for n in nume if n.upper().startswith("STATUS_") and not guard.motiv_refuz(n)})
+        explicite = {c.job for g in self.profil.grupuri for c in g.citiri}
+        grupuri = [replace(g, citiri=[replace(c, toate=True) for c in g.citiri]) for g in self.profil.grupuri]
+        noi, cu_argumente = [], []
+        for n in status:
+            if n in explicite:
+                continue
+            ra = self.sursa.run("_ARGUMENTS", parametri=n, ecu=ecu)
+            if any("ARG" in x for x in ra.seturi):
+                cu_argumente.append(n)
+            else:
+                noi.append(profiles.Citire(job=n, valori={}, toate=True))
+        grupuri.append(profiles.Grup(nume="toti_senzorii", la_fiecare_s=0, citiri=noi, rotativ=True))
+        self._grupuri = grupuri
+        self.jurnal.scrie(f"Toți senzorii: {len(noi)} joburi STATUS_* descoperite în SGBD, citite pe rând (un job pe "
+                          f"ciclu); {len(cu_argumente)} sărite pentru că cer argumente.")
+        if cu_argumente:
+            self.jurnal.scrie("Sărite (cer argumente): " + ", ".join(cu_argumente))
+
+    def _preia_toate(self, c: profiles.Citire, v: dict, vu: dict, rand: dict):
+        """Toate rezultatele unui job devin coloane: aliasul din profil unde exista, altfel <job>__<rezultat> (litere mici)."""
+        invers = {rez.upper(): alias for alias, rez in c.valori.items()}
+        scurt = c.job[7:] if c.job.upper().startswith("STATUS_") else c.job
+        for k, x in v.items():
+            ku = k.upper()
+            if ku == "JOB_STATUS" or ku.startswith("_TEL") or ku.endswith("_EINH"):
+                continue
+            if isinstance(x, bool) or not isinstance(x, (int, float, str)) or (isinstance(x, str) and x.startswith("hex:")):
+                continue
+            alias = invers.get(ku)
+            if alias is None:
+                alias = re.sub(r"[^a-z0-9_]", "_", f"{scurt}__{ku[5:] if ku.startswith('STAT_') else ku}".lower())
+                if not alias[0].isalpha():
+                    alias = "x" + alias
+            unitate = vu.get(_nume_unitate(k).upper())
+            unitate = "" if unitate in (None, "") else str(unitate)
+            with self._lock:
+                m = self.mapare.get(alias)
+                if m is None:
+                    self.mapare[alias] = {"job": c.job, "rezultat": k, "unitate": unitate}
+                    self._v_mapare += 1
+                elif not m["unitate"] and unitate:
+                    m["unitate"] = unitate
+                    self._v_mapare += 1
+            rand[alias] = x
+
     def _citeste(self, c: profiles.Citire, rand: dict) -> int:
         # prima citire a jobului: FARA filtru, ca sa vina si unitatile (_EINH nu vin cu result_filter)
         cere_unitati = c.job not in self._unitati_cerute
-        filtru = "" if cere_unitati else ";".join(c.valori.values())
+        filtru = "" if (cere_unitati or c.toate) else ";".join(c.valori.values())
         r = self.sursa.run(c.job, filtru, c.parametri, ecu=self.profil.ecu)
         s = self.statistici_joburi[c.job]
         s["n"] += 1
@@ -466,11 +564,19 @@ class Recorder:
             s["erori"] += 1
             self.erori += 1
             self._eroare_job(c.job, r)
+            if c.toate and r.status and r.status != "OKAY" and r.status.upper().startswith("ERROR_"):
+                # calculatorul a raspuns, dar jobul nu merge aici (ex. nesuportat): nu-l mai cerem in aceasta sesiune
+                self._dezactivate.add(c.job)
+                self.jurnal.scrie(f"{c.job} dezactivat pe durata citirii: {r.status}", "avertisment")
             return 0
         s["ok"] += 1
         self._ultima_eroare.pop(c.job, None)
         v = r.valori()
         vu = {k.upper(): x for k, x in v.items()}
+        if c.toate:
+            self._preia_toate(c, v, vu, rand)
+            self._unitati_cerute.add(c.job)
+            return 1
         for alias, rez in c.valori.items():
             if rez.upper() in vu:
                 rand[alias] = vu[rez.upper()]

@@ -1,0 +1,72 @@
+nume = "toate_senzorii"
+descriere = "DOAR PENTRU CITIRE LIVE (nu se poate înregistra): valorile rapide în fiecare ciclu, plus TOȚI senzorii: la pornire se descoperă din SGBD toate joburile STATUS_* fără argumente și se citesc pe rând, un job pe ciclu. Un tur complet durează câteva zeci de secunde."
+ecu = "MEV9N46L"
+toate_senzorii = true         # joburile STATUS_* se descopera la pornire (doar citire; vezi docs/SPECIFICATIE.md, sectiunea 14)
+erori_la_start = false
+erori_la_stop = false
+
+[[grup]]
+nume = "rapid"
+la_fiecare_s = 0
+  [[grup.citire]]
+  job = "STATUS_MESSWERTE"
+  valori = { rpm = "STAT_NMOT_WERT", rpm_tinta = "STAT_NSOL_WERT", tmot = "STAT_TMOT_WERT", taer = "STAT_TANS_WERT", ub = "STAT_UB_WERT", viteza = "STAT_VFZG_WERT", upedala = "STAT_UPWG_WERT", maf = "STAT_MSHFM_WERT", cuplu = "STAT_MIIST_WERT", fr1 = "STAT_FR_WERT", fr2 = "STAT_FR2_WERT", te = "STAT_TE_WERT", clapeta = "STAT_WDKBA_WERT", avans = "STAT_ZWOUT_WERT", came_ev = "STAT_WNWKWA_WERT", came_adm = "STAT_WNWKWE_WERT" }
+  [[grup.citire]]
+  job = "STATUS_FASTA2"
+  valori = { sarcina = "STAT_RL_WERT", sarcina_tinta = "STAT_RLSOL_WERT", pedala = "STAT_WPED_WERT", te2 = "STAT_TE2_WERT", llr_int = "STAT_DMLLRI_WERT" }
+
+[[grup]]
+nume = "lent"
+la_fiecare_s = 0
+rotativ = true            # un singur job din grup pe ciclu, pe rand
+  [[grup.citire]]
+  job = "STATUS_LAUFUNRUHE"
+  valori = { lu1 = "STAT_LUTSFI1_WERT", lu2 = "STAT_LUTSFI2_WERT", lu3 = "STAT_LUTSFI3_WERT", lu4 = "STAT_LUTSFI4_WERT" }
+
+  [[grup.citire]]
+  job = "STATUS_L_SONDE"
+  valori = { sonda_pre_b1 = "STAT_L_SONDE_WERT" }
+  [[grup.citire]]
+  job = "STATUS_L_SONDE_2"
+  valori = { sonda_pre_b2 = "STAT_L_SONDE_2_WERT" }
+  [[grup.citire]]
+  job = "STATUS_L_SONDE_H"
+  valori = { sonda_post_b1 = "STAT_L_SONDE_H_WERT" }
+  [[grup.citire]]
+  job = "STATUS_L_SONDE_2_H"
+  valori = { sonda_post_b2 = "STAT_L_SONDE_2_H_WERT" }
+  [[grup.citire]]
+  job = "STATUS_FUNKTIONSSTATI"
+  valori = { regl_ralanti = "STAT_LL_EIN", regl_lambda1 = "STAT_LR_EIN", regl_lambda2 = "STAT_LR2_EIN" }
+
+[[marcaj]]
+eticheta = "Cuplez ambreiajul"
+tasta = "1"
+[[marcaj]]
+eticheta = "Simt problema"
+tasta = "2"
+[[marcaj]]
+eticheta = "Accelerez tare"
+tasta = "3"
+[[marcaj]]
+eticheta = "Stau la semafor"
+tasta = "4"
+
+[[steag]]
+nume = "cadere_la_cuplare"
+tip = "cadere"
+camp = "rpm"
+cu = 150
+in_s = 1.5
+conditii = ["pedala < 2", "viteza < 15"]
+[[steag]]
+nume = "tmot_prag"
+tip = "trece_prag"
+camp = "tmot"
+praguri = [40, 60, 80]
+[[steag]]
+nume = "tensiune_mica"
+tip = "sub"
+camp = "ub"
+valoare = 12.0
+timp_s = 3

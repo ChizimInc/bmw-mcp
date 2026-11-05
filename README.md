@@ -42,7 +42,7 @@ Datele se salvează în `Documents\bmw-data\sesiuni\...`. Folderul se poate schi
 
 Cât timp loggerul înregistrează, nu folosi serverul MCP: EDIABAS acceptă o singură sesiune pe port.
 
-Pagini ale interfeței web: **Înregistrare** (Start/Stop, salvare în CSV), **Sesiuni** (citirea sesiunilor salvate: grafice, tabel, evenimente, erori, fragment ales cu slider), **Live** (citire în timp real FĂRĂ înregistrare: nu se scrie nimic pe disc decât dacă salvezi explicit) și **Comparare** (rece vs cald). Înregistrarea, citirea live și serverul MCP nu rulează în același timp.
+Pagini ale interfeței web: **Înregistrare** (Start/Stop, salvare în CSV), **Sesiuni** (citirea sesiunilor salvate: grafice, tabel, evenimente, erori, fragment ales cu slider), **Live** (citire în timp real FĂRĂ înregistrare: nu se scrie nimic pe disc decât dacă salvezi explicit; cu profilul `toate_senzorii` vezi valorile de la TOȚI senzorii, descoperiți din calculator) și **Comparare** (rece vs cald). Înregistrarea, citirea live și serverul MCP nu rulează în același timp.
 
 ## Rezumat în consolă
 

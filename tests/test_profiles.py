@@ -37,6 +37,16 @@ class TestProfile(unittest.TestCase):
         self.assertEqual(p.aliasuri(), ["rpm"])
         self.assertTrue(p.erori_la_start)
 
+    def test_toate_senzorii_si_rotativ(self):
+        p = self.incarca_text('toate_senzorii = true\n' + BAZA.replace('la_fiecare_s = 0', 'la_fiecare_s = 0\nrotativ = true'))
+        self.assertTrue(p.toate_senzorii)
+        self.assertTrue(p.grupuri[0].rotativ)
+        p = self.incarca_text(BAZA)
+        self.assertFalse(p.toate_senzorii)
+        self.assertFalse(p.grupuri[0].rotativ)
+        self.assertRespins('toate_senzorii = "da"\n' + BAZA, "toate_senzorii")
+        self.assertRespins(BAZA.replace('la_fiecare_s = 0', 'la_fiecare_s = 0\nrotativ = "da"'), "rotativ")
+
     def assertRespins(self, text, *fragmente):
         with self.assertRaises(profiles.ProfilInvalid) as cm:
             self.incarca_text(text)

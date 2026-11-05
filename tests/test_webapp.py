@@ -342,6 +342,32 @@ class TestWebapp(unittest.TestCase):
         for ip in adrese_locale():
             self.assertFalse(ip.startswith("127."))
 
+    def test_toate_senzorii_doar_live(self):
+        dir_profile = self.app.dir_profile
+        (dir_profile / "toate_senzorii.toml").write_text(
+            (profiles.DIR_PROFILE / "toate_senzorii.toml").read_text(encoding="utf-8"), encoding="utf-8")
+        profile = {p["fisier"]: p for p in self.j("/api/profile")[1]}
+        self.assertTrue(profile["toate_senzorii"]["doar_live"])
+        self.assertFalse(profile["eveniment_rapid"]["doar_live"])
+        cod, r = self.j("/api/start", {"profil": "toate_senzorii"})  # inregistrare: refuzata
+        self.assertEqual(cod, 400)
+        self.assertIn("doar pentru citirea live", r["eroare"])
+        self.assertFalse(self.app.activ)
+        self.assertEqual(self.j("/api/live/start", {"profil": "toate_senzorii"})[0], 200)
+        time.sleep(2.0)
+        cod, d = self.j("/api/live")
+        self.assertEqual(cod, 200)
+        self.assertGreater(len(d["aliasuri"]), 50)
+        self.assertEqual(set(d["aliasuri"]), set(d["mapare"]))
+        self.assertIn("v_mapare", d)
+        cod, d2 = self.j(f"/api/live?de_la_ciclu={d['ciclu_ultim']}&de_la_mapare={d['v_mapare']}&coloane=rpm")
+        self.assertEqual(cod, 200)
+        self.assertNotIn("mapare", d2)
+        self.assertEqual(self.j("/api/live?coloane=nu_exista_deloc")[0], 400)
+        self.assertEqual(self.j("/api/live?de_la_mapare=x")[0], 400)
+        self.j("/api/live/stop", {})
+        self.assertFalse((self.app.dir_date / "sesiuni").exists())
+
     def test_dictionar_nume_ro(self):
         cod, corp, _ = self.cere("/nume_ro.json")
         d = json.loads(corp.decode("utf-8"))

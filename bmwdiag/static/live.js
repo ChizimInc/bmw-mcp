@@ -1,5 +1,6 @@
-// Pagina „Live”: citire fără înregistrare (Etapele 11–13). Interoghează /api/live la ~0,7 s și ține în memorie
-// doar fereastra afișată. Nu scrie nimic pe disc, în afară de „Salvează” cerut explicit. Doar citire.
+// Pagina „Live”: citire fără înregistrare (Etapele 11–13) și, cu profilul toate_senzorii, TOATE valorile de la toți
+// senzorii. Interoghează /api/live la ~0,7 s și ține în memorie doar fereastra afișată. Nu scrie nimic pe disc, în afară
+// de „Salvează” cerut explicit. Doar citire.
 "use strict";
 
 const $ = (id) => document.getElementById(id);
@@ -17,22 +18,29 @@ const PRESETARI = [
 const CARTELE = ["rpm", "pedala", "sarcina", "cuplu", "clapeta", "tmot", "viteza", "ub", "maf", "avans"];
 const INTERVAL_ACTIV_MS = 700, INTERVAL_OPRIT_MS = 2500;
 const RETINE_S = 660; // cât timp se păstrează în browser (10 min + rezervă)
+const MAX_SELECTIE = 8;
 
-let dict = { coloane: {}, unitati: {} };
-let D = null; // {t:[], ciclu:[], c:{alias:[]}, cursor, evCursor, evs:[], unitati:{}, aliasuri:[], profil}
-let ultima = {}; // alias -> ultima valoare nenulă
+let dict = { coloane: {}, unitati: {}, stat: {}, joburi: {} };
+// D: {t:[], ciclu:[], c:{alias:[]} (doar coloanele cerute), cursor, evCursor, evs:[], mapare:{alias:{job,rezultat,unitate}},
+//     aliasuri:[], unitati:{}, vMapare:-1, valori:{alias:ultima valoare brută}, profil}
+let D = null;
 let ultimaPeRand = {}; // alias -> true dacă ultimul rând are valoare
 let stare = null; // ultimul răspuns /api/live
 let activeP = new Set(["Turație", "Sarcină și cuplu"]);
+let selectate = new Set(); // aliasuri bifate în tabel -> graficul „Selecție”
 let ferestra = 30;
 let inghetat = false;
 let xInghetat = null; // intervalul x păstrat cât timp graficele sunt înghețate
-let grafice = []; // [{nume, cols, card, zona, u}]
+let grafice = []; // [{cheie, nume, cols, card, zona, u}]
 let cronometru = null, cerereInZbor = false, jeton = 0;
 let obs = null;
+let profile = [];
+let deschise = new Set(); // joburile deschise în tabel
+let celule = {}; // alias -> {val, un, tr, bifa}
+let cautare = "";
 
-function el(eticheta, atribute, ...copii) {
-  const e = document.createElement(eticheta);
+function el(eticheta_, atribute, ...copii) {
+  const e = document.createElement(eticheta_);
   for (const [k, v] of Object.entries(atribute || {})) {
     if (v === null || v === undefined || v === false) continue;
     if (k === "class") e.className = v;
@@ -72,13 +80,21 @@ function fmtRel(sec, zec) {
   return h ? `${h}:${pad2(m)}:${rs}` : `${m}:${rs}`;
 }
 
-function eticheta(a) { const d = dict.coloane[a]; return d && d.eticheta ? d.eticheta : a; }
+// etichetă: dicționarul de coloane (aliasuri din profil), apoi dicționarul STAT_* (aliasuri automate), apoi numele brut
+function eticheta(a) {
+  const d = dict.coloane[a];
+  if (d && d.eticheta) return d.eticheta;
+  const m = D && D.mapare[a];
+  if (m) return dict.stat[m.rezultat] || m.rezultat;
+  return a;
+}
 function unitate(a) {
   const d = dict.coloane[a];
   if (d && d.unitate_afisata !== undefined && d.unitate_afisata !== "") return d.unitate_afisata;
   const brut = D && D.unitati ? String(D.unitati[a] || "").trim() : "";
   return dict.unitati[brut] || brut;
 }
+function numeJob(job) { return dict.joburi[job] || job; }
 
 function culori() {
   const st = getComputedStyle(document.documentElement);
@@ -89,30 +105,38 @@ function culori() {
 
 // ---------- date ----------
 function reseteazaDate() {
-  D = { t: [], ciclu: [], c: {}, cursor: 0, evCursor: 0, evs: [], unitati: {}, aliasuri: [], profil: null };
-  ultima = {}; ultimaPeRand = {};
+  D = { t: [], ciclu: [], c: {}, cursor: 0, evCursor: 0, evs: [], mapare: {}, aliasuri: [], unitati: {}, vMapare: -1, valori: {}, profil: null };
+  ultimaPeRand = {};
 }
 
-function adauga(r) {
-  if (r.reset) { const aliasuri = D.aliasuri, u = D.unitati; reseteazaDate(); D.aliasuri = aliasuri; D.unitati = u; }
-  if (r.aliasuri) D.aliasuri = r.aliasuri;
-  D.unitati = r.unitati || D.unitati;
+// coloanele pentru care ținem istoric: cartele + toate presetările + selecția (restul se văd doar ca valoare curentă)
+function coloaneCerute() {
+  const s = new Set([...CARTELE, ...PRESETARI.flatMap(([, c]) => c), ...selectate]);
+  return [...s].filter((a) => D.mapare[a]);
+}
+
+function adauga(r, cerute, prima) {
+  if (r.reset && !prima) {
+    const { mapare, aliasuri, unitati, vMapare, valori } = D;
+    reseteazaDate();
+    Object.assign(D, { mapare, aliasuri, unitati, vMapare, valori });
+  }
+  if (r.mapare) { D.mapare = r.mapare; D.aliasuri = r.aliasuri; D.unitati = r.unitati || {}; }
+  if (r.v_mapare !== undefined) D.vMapare = r.v_mapare;
+  D.valori = r.valori || D.valori;
   D.profil = r.profil || D.profil;
+  for (const e of r.evenimente || []) D.evs.push(e);
+  D.evCursor = r.ev_ultim !== undefined ? r.ev_ultim : D.evCursor;
+  if (prima) return; // primul răspuns aduce doar structura (mapare, valori); datele se cer apoi cu coloanele necesare
   const n = r.t.length;
-  for (const a of D.aliasuri) {
+  for (const a of cerute) {
     const nou = r[a] || new Array(n).fill(null);
     (D.c[a] = D.c[a] || new Array(D.t.length).fill(null)).push(...nou);
-    if (n) {
-      const v = nou[n - 1];
-      ultimaPeRand[a] = v !== null && v !== undefined;
-      for (let i = n - 1; i >= 0; i--) if (nou[i] !== null && nou[i] !== undefined) { ultima[a] = nou[i]; break; }
-    }
+    if (n) ultimaPeRand[a] = nou[n - 1] !== null && nou[n - 1] !== undefined;
   }
   D.t.push(...r.t);
   D.ciclu.push(...r.ciclu);
   D.cursor = r.ciclu_ultim;
-  for (const e of r.evenimente || []) D.evs.push(e);
-  D.evCursor = r.ev_ultim !== undefined ? r.ev_ultim : D.evCursor;
   taie();
 }
 
@@ -132,13 +156,15 @@ async function ciclu() {
   if (cerereInZbor) return;
   cerereInZbor = true;
   const j = jeton;
-  let r = null;
+  let r = null, repeta = false;
   try {
-    r = await api(`/api/live?de_la_ciclu=${D.cursor}&de_la_ev=${D.evCursor}`);
+    const prima = D.vMapare === -1; // întâi doar structura (sute de coloane cu toate_senzorii), apoi coloanele necesare
+    const cerute = prima ? [] : coloaneCerute();
+    r = await api(`/api/live?de_la_ciclu=${prima ? 0 : D.cursor}&de_la_ev=${D.evCursor}&de_la_mapare=${D.vMapare}&coloane=${cerute.map(encodeURIComponent).join(",")}`);
     if (j !== jeton) return;
     eroarePagina("");
     stare = r;
-    if (r.stare === "oprit" && !r.mod) { /* nimic de citit */ } else adauga(r);
+    if (r.stare === "oprit" && !r.mod) { /* nimic de citit */ } else { adauga(r, cerute, prima); repeta = prima && r.v_mapare !== undefined; }
     afiseazaStare(r);
     deseneaza();
   } catch (e) {
@@ -148,7 +174,7 @@ async function ciclu() {
   } finally {
     cerereInZbor = false;
     clearTimeout(cronometru);
-    cronometru = setTimeout(ciclu, stare && stare.activ ? INTERVAL_ACTIV_MS : INTERVAL_OPRIT_MS);
+    cronometru = setTimeout(ciclu, repeta ? 0 : stare && stare.activ ? INTERVAL_ACTIV_MS : INTERVAL_OPRIT_MS);
   }
 }
 
@@ -185,13 +211,13 @@ function afiseazaStare(s) {
 
 function deseneaza() {
   deseneazaCartele();
+  deseneazaTabel();
   deseneazaGrafice();
 }
 
 function deseneazaCartele() {
   const z = $("cartele");
-  if (!D || !D.t.length) { if (!z.querySelector(".cv")) return; }
-  const aliasuri = CARTELE.filter((a) => D && D.aliasuri.includes(a));
+  const aliasuri = CARTELE.filter((a) => D && D.mapare[a]);
   if (!aliasuri.length) return;
   if (z.dataset.chei !== aliasuri.join(",")) {
     z.innerHTML = "";
@@ -201,15 +227,101 @@ function deseneazaCartele() {
   }
   for (const a of aliasuri) {
     const c = $("cv-" + a);
-    c.querySelector(".val").textContent = a in ultima ? fmtVal(ultima[a]) : "–";
+    const v = D.valori[a];
+    c.querySelector(".val").textContent = typeof v === "number" ? fmtVal(v) : "–";
     c.querySelector(".un").textContent = unitate(a);
-    c.classList.toggle("vechi", a in ultima && !ultimaPeRand[a]); // grup lent: ultima valoare citită, nu din ultimul ciclu
+    c.classList.toggle("vechi", typeof v === "number" && ultimaPeRand[a] === false); // grup lent: ultima valoare citită
   }
 }
 
+// ---------- tabelul cu TOATE valorile ----------
+function formateaza(alias, v) {
+  if (v === undefined || v === null) return "–";
+  if (typeof v === "string") return v;
+  const m = D.mapare[alias];
+  if (m && /_EIN$/i.test(m.rezultat)) return v ? "da" : "nu";
+  return fmtVal(v);
+}
+
+function deseneazaTabel() {
+  const z = $("tabel-valori");
+  if (!D || !D.aliasuri.length) return;
+  if (z.dataset.v !== String(D.vMapare) || z.dataset.p !== String(D.profil)) construiesteTabel(z);
+  for (const [a, c] of Object.entries(celule)) {
+    const t = formateaza(a, D.valori[a]);
+    if (c.val.textContent !== t) c.val.textContent = t;
+    c.val.classList.toggle("text", typeof D.valori[a] === "string");
+    const nume = unitate(a);
+    if (c.un.textContent !== nume) c.un.textContent = nume;
+  }
+}
+
+function construiesteTabel(z) {
+  z.dataset.v = String(D.vMapare);
+  z.dataset.p = String(D.profil);
+  z.innerHTML = "";
+  celule = {};
+  const grupuri = new Map();
+  for (const a of D.aliasuri) {
+    const job = D.mapare[a].job;
+    if (!grupuri.has(job)) grupuri.set(job, []);
+    grupuri.get(job).push(a);
+  }
+  for (const [job, aliasuri] of grupuri) {
+    const corp = el("tbody");
+    for (const a of aliasuri) {
+      const m = D.mapare[a];
+      const val = el("td", { class: "val" }), un = el("td", { class: "un" });
+      const bifa = el("input", { type: "checkbox", checked: selectate.has(a), "aria-label": `Grafic: ${eticheta(a)}`,
+        onchange: (ev) => comutaSelectie(a, ev.target) });
+      const tr = el("tr", { "data-alias": a, "data-text": `${eticheta(a)} ${a} ${m.rezultat} ${job} ${numeJob(job)}`.toLowerCase() },
+        el("td", { title: `${a} · ${m.rezultat}` }, eticheta(a), el("span", { class: "tehnic-rez", text: m.rezultat })),
+        val, un, el("td", { class: "gr" }, el("label", {}, bifa, el("span", { class: "gr-txt", text: " Grafic" }))));
+      corp.append(tr);
+      celule[a] = { val, un, tr, bifa };
+    }
+    const d = el("details", { class: "grup-valori", "data-job": job, open: deschise.has(job) || null,
+      ontoggle: (ev) => { if (!cautare) { if (ev.target.open) deschise.add(job); else deschise.delete(job); } } },
+    el("summary", {}, numeJob(job), el("span", { class: "mic", text: `${aliasuri.length} valori${numeJob(job) !== job ? " · " + job : ""}` })),
+    el("div", { class: "derulare" }, el("table", {}, corp)));
+    z.append(d);
+  }
+  $("numar-valori").textContent = `(${D.aliasuri.length} valori din ${grupuri.size} joburi)`;
+  aplicaFiltru();
+}
+
+function aplicaFiltru() {
+  const q = cautare.trim().toLowerCase();
+  for (const d of document.querySelectorAll("#tabel-valori .grup-valori")) {
+    let vizibile = 0;
+    for (const tr of d.querySelectorAll("tr")) {
+      const arata = !q || tr.dataset.text.includes(q);
+      tr.hidden = !arata;
+      if (arata) vizibile++;
+    }
+    d.hidden = vizibile === 0;
+    if (q && vizibile) d.open = true;
+    else if (!q) d.open = deschise.has(d.dataset.job);
+  }
+}
+
+function comutaSelectie(alias, bifa) {
+  if (bifa.checked) {
+    if (selectate.size >= MAX_SELECTIE) {
+      bifa.checked = false;
+      eroarePagina(`Cel mult ${MAX_SELECTIE} mărimi în graficul „Selecție”.`);
+      return;
+    }
+    eroarePagina("");
+    selectate.add(alias);
+    if (D && !D.c[alias]) D.c[alias] = new Array(D.t.length).fill(null); // istoricul începe de la bifare
+  } else selectate.delete(alias);
+  deseneazaGrafice();
+}
+
+// ---------- grafice ----------
 function presetariDisponibile() {
-  const disp = new Set(D ? D.aliasuri : []);
-  return PRESETARI.map(([n, cols]) => [n, cols.filter((c) => disp.has(c))]).filter(([, c]) => c.length);
+  return PRESETARI.map(([n, cols]) => [n, cols.filter((c) => D && D.mapare[c])]).filter(([, c]) => c.length);
 }
 
 function deseneazaBifePresetari() {
@@ -221,7 +333,7 @@ function deseneazaBifePresetari() {
   for (const [nume] of presetariDisponibile()) {
     f.append(el("label", {}, el("input", { type: "checkbox", checked: activeP.has(nume), onchange: (ev) => {
       if (ev.target.checked) activeP.add(nume); else activeP.delete(nume);
-      reconstruiesteGrafice();
+      deseneazaGrafice();
     } }), nume));
   }
 }
@@ -235,7 +347,7 @@ function xFereastra() {
 function reconstruiesteGrafice() {
   for (const g of grafice) { if (g.u) g.u.destroy(); g.card.remove(); }
   grafice = [];
-  deseneazaGrafice(true);
+  deseneazaGrafice();
 }
 
 function deseneazaGrafice() {
@@ -243,19 +355,22 @@ function deseneazaGrafice() {
   deseneazaBifePresetari();
   const zona = $("zona-grafice");
   const dorite = presetariDisponibile().filter(([n]) => activeP.has(n));
+  const sel = [...selectate].filter((a) => D.mapare[a]);
+  if (sel.length) dorite.push(["Selecție", sel]);
   if (!dorite.length && !grafice.length) return;
-  if (grafice.map((g) => g.nume).join("|") !== dorite.map(([n]) => n).join("|")) {
+  const cheie = (n, c) => n + ":" + c.join(",");
+  if (grafice.map((g) => g.cheie).join("|") !== dorite.map(([n, c]) => cheie(n, c)).join("|")) {
     for (const g of grafice) { if (g.u) g.u.destroy(); g.card.remove(); }
     grafice = dorite.map(([nume, cols]) => {
       const z = el("div", { class: "zona" });
       const card = el("section", { class: "card-grafic", "aria-label": nume }, el("h3", { text: nume }), z);
       zona.append(card);
-      return { nume, cols, card, zona: z, u: null };
+      return { cheie: cheie(nume, cols), nume, cols, card, zona: z, u: null };
     });
   }
   if (inghetat) return;
   for (const g of grafice) {
-    const date = [D.t, ...g.cols.map((c) => D.c[c] || new Array(D.t.length).fill(null))];
+    const date = [D.t, ...g.cols.map((c) => D.c[c] || (D.c[c] = new Array(D.t.length).fill(null)))];
     if (!g.u) { if (D.t.length) construieste(g, date); }
     else g.u.setData(date, true);
   }
@@ -314,6 +429,8 @@ async function start() {
   eroarePagina("");
   try {
     reseteazaDate();
+    celule = {};
+    $("tabel-valori").dataset.v = "";
     jeton++;
     reconstruiesteGrafice();
     await api("/api/live/start", { profil: $("profil").value });
@@ -342,7 +459,9 @@ async function salveaza() {
 
 async function inregistreaza() {
   const m = $("in-mesaj"), profil = $("profil").value;
+  const p = profile.find((x) => x.fisier === profil);
   if (!profil) { m.textContent = "Alege un profil."; return; }
+  if (p && p.doar_live) { m.textContent = `Profilul „${p.nume}” e doar pentru citire live; alege altul pentru înregistrare.`; return; }
   if (stare && stare.activ && !window.confirm("Oprești citirea live și începi o înregistrare nouă? Datele din live nu intră în ea.")) return;
   m.textContent = "Se oprește live…";
   try {
@@ -360,16 +479,23 @@ function taste(ev) {
   if (b) b.click();
 }
 
+function hintProfil() {
+  const p = profile.find((x) => x.fisier === $("profil").value);
+  $("descriere-profil").textContent = p && p.descriere ? p.descriere : "";
+  $("hint-toti").textContent = p && p.doar_live
+    ? "Profil „toate senzorii”: la pornire se descoperă joburile STATUS_* din calculator, iar toate rezultatele lor apar mai jos."
+    : "Vrei absolut toate datele de la toți senzorii? Oprește citirea și alege profilul „toate_senzorii”.";
+}
+
 async function porneste() {
   try { dict = { ...dict, ...(await (await fetch("/nume_ro.json")).json()) }; } catch (e) { /* nume brute */ }
   reseteazaDate();
-  let profile = [];
   try { profile = await api("/api/profile"); } catch (e) { eroarePagina("Nu pot citi profilele: " + e.message); }
   const sel = $("profil");
-  for (const p of profile) sel.append(el("option", { value: p.fisier, text: p.eroare ? `${p.nume} (invalid)` : p.nume, disabled: !!p.eroare }));
-  const descr = () => { const p = profile.find((x) => x.fisier === sel.value); $("descriere-profil").textContent = p && p.descriere ? p.descriere : ""; };
-  sel.addEventListener("change", descr);
-  descr();
+  for (const p of profile) sel.append(el("option", { value: p.fisier, text: p.eroare ? `${p.nume} (invalid)` : p.doar_live ? `${p.nume} (toți senzorii)` : p.nume, disabled: !!p.eroare }));
+  const implicit = profile.find((p) => p.doar_live && !p.eroare);
+  if (implicit) sel.value = implicit.fisier;
+  sel.addEventListener("change", hintProfil);
   try { // marcajele profilului ales (din starea curentă, dacă rulează)
     const s = await api("/api/stare");
     if (s.profil && s.activ) sel.value = (profile.find((p) => p.nume === s.profil) || {}).fisier || sel.value;
@@ -378,10 +504,19 @@ async function porneste() {
     lista.forEach((m) => z.append(el("button", { type: "button", disabled: true, "data-tasta": m.tasta || "",
       text: (m.tasta ? `${m.tasta}. ` : "") + m.eticheta, onclick: () => marcaj(m.eticheta) })));
   } catch (e) { /* fără marcaje */ }
+  hintProfil();
   $("start").addEventListener("click", start);
   $("stop").addEventListener("click", opreste);
   $("sv-buton").addEventListener("click", salveaza);
   $("in-buton").addEventListener("click", inregistreaza);
+  $("cauta-valori").addEventListener("input", (ev) => { cautare = ev.target.value; aplicaFiltru(); });
+  $("deschide-tot").addEventListener("click", () => { for (const d of document.querySelectorAll("#tabel-valori .grup-valori")) { d.open = true; deschise.add(d.dataset.job); } });
+  $("inchide-tot").addEventListener("click", () => { deschise.clear(); for (const d of document.querySelectorAll("#tabel-valori .grup-valori")) d.open = false; });
+  $("goleste-selectia").addEventListener("click", () => {
+    selectate.clear();
+    for (const c of Object.values(celule)) c.bifa.checked = false;
+    deseneazaGrafice();
+  });
   $("ingheata").addEventListener("click", () => {
     inghetat = !inghetat;
     xInghetat = inghetat ? xFereastra() : null;

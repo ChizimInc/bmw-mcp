@@ -52,7 +52,8 @@ async function incarcaProfile() {
   for (const p of profile) {
     const o = document.createElement("option");
     o.value = p.fisier;
-    o.textContent = p.eroare ? `${p.nume} (invalid)` : p.nume;
+    o.textContent = p.eroare ? `${p.nume} (invalid)` : p.doar_live ? `${p.nume} (doar live)` : p.nume;
+    if (p.doar_live) o.disabled = true; // profilul „toate senzorii” se citește doar în pagina Live
     sel.appendChild(o);
   }
   if (ales) sel.value = ales;

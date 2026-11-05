@@ -134,6 +134,49 @@ class FakeSource:
     def _z(self, sigma: float) -> float:
         return self._rnd.gauss(0, sigma)
 
+    # --- descrierea SGBD-ului (jobul _JOBS / _ARGUMENTS) si cateva joburi STATUS_* simulate generic, ca citirea
+    #     "toate senzorii" sa poata fi probata fara masina. Valorile lor sunt inventate (nu au sens fizic).
+    _SINTETICE = {"STATUS_FASTA3": ("w", 5), "STATUS_FASTA4": ("w", 4), "STATUS_FASTA5": ("w", 6), "STATUS_FASTA6": ("w", 3),
+                  "STATUS_FASTA7": ("w", 4), "STATUS_AUSGAENGE": ("b", 6), "STATUS_DIGITAL": ("b", 8),
+                  "STATUS_SCHALTERSTATI": ("b", 5), "STATUS_OELSENSOR": ("w", 3), "STATUS_BATTERIEINTEGRATOR": ("w", 2),
+                  "STATUS_BETRIEBSSTUNDENZAEHLER": ("w", 1)}
+    _CU_ARGUMENTE = ("STATUS_ADD",)         # cer un argument: citirea "toate senzorii" le sare
+    _NESUPORTATE = ("STATUS_KVA",)          # exista in SGBD, dar calculatorul raspunde cu eroare
+    _NEJOBURI_STATUS = ("IDENT", "FS_LESEN", "STEUERN_PROBA", "STATUS_X_LOESCHEN")  # trebuie filtrate de garda / prefix
+
+    def _lista_joburi(self) -> list[str]:
+        simulate = ["STATUS_MESSWERTE", "STATUS_FASTA1", "STATUS_FASTA2", "STATUS_LAUFUNRUHE", "STATUS_FUNKTIONSSTATI",
+                    "STATUS_L_SONDE", "STATUS_L_SONDE_2", "STATUS_L_SONDE_H", "STATUS_L_SONDE_2_H", "STATUS_GEMISCH",
+                    "STATUS_VVT", "STATUS_GEBERRAD_ADAPTION", "STATUS_READINESS", "STATUS_MOTORDREHZAHL",
+                    "STATUS_MOTORTEMPERATUR", "STATUS_AN_LUFTTEMPERATUR", "STATUS_UBATT", "STATUS_LMM_MASSE",
+                    "STATUS_PWG_POTI_SPANNUNG", "STATUS_LLABG", "STATUS_DKHFM", "STATUS_SAUGROHR",
+                    "STATUS_SYSTEMCHECK_KAT", "STATUS_SYSTEMCHECK_LAMBDA_AUS"]
+        return simulate + list(self._SINTETICE) + list(self._CU_ARGUMENTE) + list(self._NESUPORTATE) + list(self._NEJOBURI_STATUS)
+
+    def _seturi_descriere(self, job: str, parametri: str):
+        if job == "_JOBS":
+            return [{"JOBNAME": n} for n in self._lista_joburi()] + [{"JOB_STATUS": "OKAY"}]
+        if job == "_ARGUMENTS":
+            arg = [{"ARG": "ADRESA", "ARGTYPE": "string", "ARGCOMMENT": "(simulat)"}] if parametri in self._CU_ARGUMENTE else []
+            return arg + [{"JOB_STATUS": "OKAY"}]
+        return None
+
+    def _sintetic(self, job: str):
+        tip, n = self._SINTETICE[job]
+        h = sum(map(ord, job))
+        t = self._t()
+        scurt = job[7:]
+        r = {}
+        for i in range(1, n + 1):
+            if tip == "b":
+                r[f"STAT_{scurt}_{i}_EIN"] = 1 if math.sin(t / (3 + (h + i) % 7) + i) > 0 else 0
+            else:
+                r[f"STAT_{scurt}_{i}_WERT"] = round(10 * ((h + i) % 5 + 1) + 4 * math.sin(t / (2 + (h + i) % 9) + i), 3)
+                r[f"STAT_{scurt}_{i}_EINH"] = ("V", "%", "hPa", "Grad C", "")[(h + i) % 5]
+        if job == "STATUS_OELSENSOR":
+            r["STAT_OELSENSOR_TEXT"] = "Ölstand in ordnung (simulat)"
+        return r
+
     def _valori_job(self, job: str, parametri: str):
         """dict cu rezultatele jobului (nume EDIABAS), sau None daca jobul nu e simulat."""
         s = self.stare()
@@ -218,6 +261,8 @@ class FakeSource:
             return w(job[7:], 0.0, "")
         if job in ("STATUS_SYSTEMCHECK_KAT", "STATUS_SYSTEMCHECK_LAMBDA_AUS"):
             return {"STAT_SYSTEMCHECK_TEXT": "Steuerbetrieb durch Betriebsbedingungen (simulat)"}
+        if job in self._SINTETICE:
+            return self._sintetic(job)
         if job == "IDENT":
             return {"ID_BMW_NR": "7565300", "ID_HW_NR": "01", "ID_SW_NR": "0.16.89",
                     "ID_DATUM": "10.01.2005", "VARIANTE": "MEV9N46L (simulat)"}
@@ -274,6 +319,8 @@ class FakeSource:
                 return gata(ok=False, eroare="StateError: IFH-0009: NO RESPONSE FROM CONTROLUNIT (simulat)")
             sistem = {"OBJECT": ecu.lower(), "JOBNAME": job, "VARIANTE": ecu, "JOBSTATUS": ""}
             seturi = self._seturi_erori(job, parametri)
+            if seturi is None:
+                seturi = self._seturi_descriere(job, parametri)
             if seturi is None:
                 valori = self._valori_job(job, parametri)
                 if valori is None:

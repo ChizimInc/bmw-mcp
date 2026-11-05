@@ -390,3 +390,15 @@ pre.text-jurnal {
 .marcaje { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 #zona-grafice .card-grafic { margin-bottom: 10px; }
 .live-ingheta { outline: 2px solid var(--galben); }
+.grup-valori { border: 1px solid var(--linie); border-radius: 8px; margin: 6px 0; background: var(--fundal); }
+.grup-valori > summary { cursor: pointer; padding: 8px 10px; font-weight: 600; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.grup-valori > summary .mic { font-weight: normal; }
+.grup-valori table { width: 100%; border-collapse: collapse; }
+.grup-valori td { padding: 4px 10px; border-top: 1px solid var(--linie); vertical-align: baseline; }
+.grup-valori td.val { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.grup-valori td.un { color: var(--slab); white-space: nowrap; }
+.grup-valori td.gr { text-align: center; white-space: nowrap; }
+.grup-valori .tehnic-rez { display: block; font-size: .72rem; color: var(--slab); overflow-wrap: anywhere; }
+.grup-valori td.text { text-align: left; font-weight: normal; white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 640px) { .grup-valori td { padding: 6px 8px; } .grup-valori td.gr label { display: inline-flex; gap: 4px; align-items: center; min-height: 32px; } }
+@media (max-width: 640px) { .grup-valori .gr-txt { display: none; } .grup-valori td.gr input { width: 22px; height: 22px; } }

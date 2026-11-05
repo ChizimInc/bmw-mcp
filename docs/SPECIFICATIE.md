@@ -140,6 +140,8 @@ valoare = 12.0
 timp_s = 3
 ```
 
+Chei opționale: `rotativ = true` pe un `[[grup]]` (o singură citire din grup pe ciclu, pe rând) și `toate_senzorii = true` la nivel de profil (doar citire live, vezi secțiunea 14.5).
+
 Alias-urile (`rpm`, `sarcina`...) devin numele coloanelor. Unitățile se iau din rezultatul `..._EINH` la prima citire și se scriu în `coloane.json`.
 
 Profile inițiale de livrat (toate cu cele trei marcaje de mai sus sau adaptate):
@@ -148,6 +150,7 @@ Profile inițiale de livrat (toate cu cele trei marcaje de mai sus sau adaptate)
 2. `drum_lung_oras`: aceleași valori + sondele lambda (4 joburi) și FUNKTIONSSTATI la 10 s; `segment_minute = 10`, `erori_interval_minute = 10`. Pentru 30+ minute prin oraș.
 3. `ralanti_incalzire`: MESSWERTE + FASTA2 la fiecare ciclu, LAUFUNRUHE + sonde + FUNKTIONSSTATI + VVT la 10 s, GEMISCH la 60 s; steag `tmot_prag` la 40/60/70/80/90. Pentru pornirea la rece până la cald, mașina pe loc.
 4. `instantaneu_complet`: o singură trecere prin toate joburile utile de la secțiunea 4 (inclusiv identificare și erori, fără AIF în rezumat), apoi se oprește singur. Util la începutul fiecărei zile de test.
+5. `toate_senzorii`: DOAR pentru citirea live (pagina Live; la înregistrare e refuzat). Valorile rapide în fiecare ciclu (aceleași aliasuri ca la `drum_lung_oras`), plus toți senzorii: joburile `STATUS_*` se descoperă din SGBD și se citesc pe rând. Vezi secțiunea 14.5.
 
 ## 7. Ciclul de citire
 
@@ -431,6 +434,20 @@ Etapa 13 – Din live în înregistrare și salvare explicită
   - `Recorder.exporta_buffer(secunde, dir_date, conditie, nota)` și `POST /api/live/salveaza {secunde, conditie, nota}`: scrie o sesiune normală (`date_001.csv` cu `t_rel_s` de la 0, `evenimente.csv` cu marcajele și steagurile din fereastră, `coloane.json`, `sesiune.json` cu `origine: "live"` și `motiv_oprire: "exportat din citirea live"`). Merge și după oprirea citirii, cât timp recorderul există (până la următorul Start). 400 la secunde nepozitive, condiție invalidă sau buffer gol; 409 dacă nu e o citire live. Este singura scriere a modului live.
   - În pagină: secțiunea „După citire” cu „Salvează” (link „Deschide sesiunea”) și „Oprește live și începe înregistrarea” (apoi trece la ecranul Înregistrare). Sesiunea salvată se deschide în Sesiuni cu grafice, rezumat și slider de fragment ca orice sesiune.
   - Teste: `test_exporta_buffer_ca_sesiune`, `test_export_doar_din_live_si_buffer_gol` și partea de salvare din testul API.
+
+### 14.5 Toți senzorii: profilul `toate_senzorii`
+
+Scop: pe pagina Live să ai ABSOLUT toate valorile pe care le poate da calculatorul prin joburi `STATUS_*`, nu doar cele alese într-un profil.
+
+- **Descoperire la pornire (doar live):** profilul are `toate_senzorii = true`. La Start, `Recorder` rulează jobul de descriere `_JOBS` (răspunde din fișierul SGBD, nu din calculator), păstrează joburile `STATUS_*` care trec de gardă, apoi `_ARGUMENTS <job>` pentru fiecare: cele care cer argumente se sar (și se scriu în jurnal), restul intră în grupul `toti_senzorii`. Dacă `_JOBS` nu dă nimic, se folosește lista celor 24 de joburi `STATUS_*` verificate pe mașină (`JOBURI_STATUS_CUNOSCUTE` din `recorder.py`). Se citesc DOAR joburi care trec de gardă; identificarea, erorile, `AIF_LESEN` (VIN) și orice job nepermis nu intră.
+- **Citire pe rând:** grupurile `rotativ` citesc un singur job pe ciclu. Grupul rapid (MESSWERTE + FASTA2) rămâne în fiecare ciclu, deci graficele principale nu încetinesc mult; fiecare job lent se reîmprospătează o dată pe tur, iar turul durează câteva zeci de secunde (depinde de câte joburi are calculatorul și de viteza liniei K). Cicluri/s scad puțin față de `drum_lung_oras` (două citiri în plus pe ciclu, nu zeci).
+- **Joburi dezactivate:** dacă un job răspunde cu un `JOB_STATUS` de tip `ERROR_*` (calculatorul răspunde, dar jobul nu merge aici), nu mai e cerut în acea citire și se scrie o linie în jurnal. Erorile de comunicare nu dezactivează nimic.
+- **Coloane automate:** toate rezultatele unui job (`STAT_*_WERT`, `*_EIN`, text) devin coloane. Unde profilul are alias (ex. `rpm`) se păstrează; restul primesc `<job fără STATUS_>__<rezultat fără STAT_>` cu litere mici (de ex. `fasta3__fasta3_1_wert`). Unitățile se iau din `*_EINH`. Valorile `hex:`, `_TEL_*` și `JOB_STATUS` se ignoră.
+- **API:** `GET /api/live` primește `de_la_mapare=<v_mapare>` și `coloane=` (gol = nicio coloană, doar structura). Răspunsul are `v_mapare` (crește când apare o coloană sau o unitate nouă), `valori` (ultima valoare brută a fiecărei coloane, inclusiv text) și, doar când `v_mapare` diferă de cel cerut, `mapare` (`alias → {job, rezultat, unitate}`), `aliasuri` și `unitati`. Istoricul pe rânduri se cere doar pentru coloanele de care are nevoie pagina (cartele, presetări, selecție), ca răspunsul să nu crească cu sutele de coloane. `GET /api/profile` are câmpul `doar_live`; `POST /api/start` cu un asemenea profil dă 400.
+- **Pagina Live:** secțiunea „Toate valorile”: câte un grup pe job (cu denumirea din `nume_ro.json` unde există, altfel numele jobului), în fiecare valoare curentă și unitate; rezultatele fără denumire apar cu numele tehnic (`STAT_...`), fără sensuri inventate. Căutare după denumire, alias, rezultat sau job; „Deschide / Închide toate”; bifa „Grafic” adaugă mărimea (până la 8) în graficul „Selecție” (istoricul ei începe de la bifare; mărimile lente au puncte rare). Biți de stare (`*_EIN`) se arată „da / nu”. Profilul `toate_senzorii` e ales implicit pe pagina Live; ecranul de înregistrare îl arată dezactivat („doar live”).
+- **Salvare:** „Salvează ultimele N secunde” include toate coloanele descoperite până atunci (sesiunea salvată are sute de coloane; se citește în Sesiuni ca orice sesiune).
+- **FakeSource:** simulează `_JOBS`, `_ARGUMENTS` și 11 joburi `STATUS_*` generice (valorile sunt inventate, fără sens fizic), un job cu argument (`STATUS_ADD`), unul nesuportat (`STATUS_KVA`) și câteva nume care trebuie filtrate, ca fluxul să se probeze fără mașină.
+- **Neverificat pe mașina reală:** forma exactă a răspunsului `_JOBS` / `_ARGUMENTS` (se așteaptă `JOBNAME` și `ARG`, ca în EDIABAS), ce joburi `STATUS_*` ale `MEV9N46L` cer argumente, cât durează un tur complet și cu cât scad ciclurile/s. De măsurat în mașină și notat în `local/BMW_CONTEXT.md`. Profilul nu are încă o listă de joburi excluse (de ex. `toate_exclude`): dacă un job se poartă prost pe mașină, ea trebuie adăugată.
 
 ### 14.4 Decizii luate la implementare
 

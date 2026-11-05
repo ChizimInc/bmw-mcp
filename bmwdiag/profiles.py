@@ -18,8 +18,9 @@ _ALIAS = re.compile(r"^[a-z][a-z0-9_]*$")
 _REZULTAT = re.compile(r"^\w+$")
 CHEI_PROFIL = {"nume", "descriere", "ecu", "segment_minute", "durata_max_minute", "cicluri_max", "min_ciclu_ms",
                "erori_la_start",
-               "erori_la_stop", "erori_interval_minute", "instantaneu_la_start", "grup", "marcaj", "steag"}
-CHEI_GRUP = {"nume", "la_fiecare_s", "citire"}
+               "erori_la_stop", "erori_interval_minute", "instantaneu_la_start", "grup", "marcaj", "steag",
+               "toate_senzorii"}
+CHEI_GRUP = {"nume", "la_fiecare_s", "rotativ", "citire"}
 CHEI_CITIRE = {"job", "valori", "parametri"}
 CHEI_MARCAJ = {"eticheta", "tasta"}
 
@@ -33,6 +34,7 @@ class Citire:
     job: str
     valori: dict[str, str]          # alias -> rezultat EDIABAS
     parametri: str = ""
+    toate: bool = False             # doar live: se citeste fara filtru si toate rezultatele devin coloane (alias automat)
 
 
 @dataclass
@@ -40,6 +42,7 @@ class Grup:
     nume: str
     la_fiecare_s: float             # 0 = in fiecare ciclu
     citiri: list[Citire]
+    rotativ: bool = False           # o singura citire din grup pe ciclu (pe rand), nu toate deodata
 
 
 @dataclass
@@ -59,6 +62,9 @@ class Profil:
     marcaje: list[dict] = field(default_factory=list)   # {eticheta, tasta}
     steaguri: list[dict] = field(default_factory=list)  # evaluate in etapa 3
     sursa_toml: str = ""
+    # doar pentru citirea live: la pornire se descopera din SGBD toate joburile STATUS_* fara argumente si se citesc pe
+    # rand (un job pe ciclu); rezultatele lor devin coloane noi. Nu se poate folosi la inregistrare (coloanele CSV sunt fixe).
+    toate_senzorii: bool = False
 
     def aliasuri(self) -> list[str]:
         return [a for g in self.grupuri for c in g.citiri for a in c.valori]
@@ -132,7 +138,9 @@ def din_dict(d: dict, sursa_toml: str = "") -> Profil:
                 if not isinstance(rez, str) or not _REZULTAT.match(rez):
                     p.append(f"{uc}: rezultatul pentru '{alias}' nu e un nume valid ({rez!r})")
             citiri.append(Citire(job=job, valori=dict(valori), parametri=c.get("parametri", "")))
-        grupuri.append(Grup(nume=text(g, "nume", ug), citiri=citiri,
+        if not isinstance(g.get("rotativ", False), bool):
+            p.append(f"{ug}: 'rotativ' trebuie să fie true sau false")
+        grupuri.append(Grup(nume=text(g, "nume", ug), citiri=citiri, rotativ=g.get("rotativ", False) is True,
                             la_fiecare_s=_numar(g, "la_fiecare_s", 0, p, ug)))
 
     inst = d.get("instantaneu_la_start", [])
@@ -143,6 +151,8 @@ def din_dict(d: dict, sursa_toml: str = "") -> Profil:
         if motiv := guard.motiv_refuz(job):
             p.append(f"instantaneu_la_start: {motiv} (doar citire)")
 
+    if not isinstance(d.get("toate_senzorii", False), bool):
+        p.append("profil: 'toate_senzorii' trebuie să fie true sau false")
     marcaje, taste = [], set()
     for k, m in enumerate(d.get("marcaj", []), start=1):
         um = f"marcajul {k}"
@@ -175,6 +185,7 @@ def din_dict(d: dict, sursa_toml: str = "") -> Profil:
         erori_la_stop=bool(d.get("erori_la_stop", True)),
         erori_interval_minute=_numar(d, "erori_interval_minute", 0, p, "profil"),
         instantaneu_la_start=list(inst), marcaje=marcaje, steaguri=list(steaguri), sursa_toml=sursa_toml,
+        toate_senzorii=d.get("toate_senzorii", False) is True,
     )
     if p:
         raise ProfilInvalid(f"Profilul '{nume or '?'}' nu se poate încărca:\n- " + "\n- ".join(p))

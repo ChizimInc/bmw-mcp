@@ -114,7 +114,8 @@ class Aplicatie:
         for nume in profiles.lista(self.dir_profile):
             try:
                 p = profiles.incarca(nume, self.dir_profile)
-                rez.append({"nume": p.nume, "fisier": nume, "descriere": p.descriere, "marcaje": p.marcaje})
+                rez.append({"nume": p.nume, "fisier": nume, "descriere": p.descriere, "marcaje": p.marcaje,
+                            "doar_live": p.toate_senzorii})
             except profiles.ProfilInvalid as e:
                 rez.append({"nume": nume, "fisier": nume, "eroare": str(e)})
         return rez
@@ -133,6 +134,9 @@ class Aplicatie:
             except profiles.ProfilInvalid as e:
                 self.jurnal.scrie(str(e), "eroare")
                 return 400, {"eroare": str(e)}
+            if p.toate_senzorii and not live:
+                return 400, {"eroare": f"Profilul '{p.nume}' e doar pentru citirea live (pagina Live): citește toți "
+                                       "senzorii, iar coloanele unei înregistrări sunt fixe."}
             try:
                 sursa = self._fabrica(p.ecu)
             except Exception as e:  # noqa: BLE001
@@ -145,7 +149,8 @@ class Aplicatie:
     def start_live(self, profil: str) -> tuple[int, dict]:
         return self.start(str(profil), live=True)
 
-    def date_live(self, de_la_ciclu: int, coloane: list[str] | None, de_la_ev: int) -> tuple[int, dict]:
+    def date_live(self, de_la_ciclu: int, coloane: list[str] | None, de_la_ev: int,
+                  de_la_mapare: int = -1) -> tuple[int, dict]:
         """Citirea live (activa sau oprita de curand: bufferul ramane pana la urmatorul start)."""
         r = self.recorder
         if r is None or r.scrie:
@@ -154,12 +159,11 @@ class Aplicatie:
             return 200, {"stare": "oprit", "mod": None, "activ": False, "t": [], "ciclu": [], "ciclu_ultim": de_la_ciclu,
                          "reset": False, "evenimente": [], "ev_ultim": de_la_ev, "unitati": {}}
         try:
-            d = r.date_live(de_la_ciclu, coloane, de_la_ev)
+            d = r.date_live(de_la_ciclu, coloane, de_la_ev, de_la_mapare)
         except ValueError as e:
             return 400, {"eroare": str(e)}
         d["activ"] = self.activ
         d["profil"] = r.profil.nume
-        d["aliasuri"] = list(r.mapare)
         return 200, d
 
     def salveaza_live(self, secunde, conditie: str, nota: str) -> tuple[int, dict]:
@@ -292,14 +296,15 @@ def fa_handler(app: Aplicatie):
                 linii = app.jurnal.de_la(de_la)
                 return self._json(200, {"linii": linii, "ultimul": linii[-1][0] if linii else de_la})
             if u.path == "/api/live":
-                q = parse_qs(u.query)
+                q = parse_qs(u.query, keep_blank_values=True)  # "coloane=" (gol) = nicio coloana, doar structura
                 try:
                     de_la = int(q.get("de_la_ciclu", ["0"])[0])
                     de_ev = int(q.get("de_la_ev", ["0"])[0])
+                    de_map = int(q.get("de_la_mapare", ["-1"])[0])
                 except ValueError:
                     return self._json(400, {"eroare": "Parametri numerici invalizi."})
                 cols = [c for c in q.get("coloane", [""])[0].split(",") if c] if "coloane" in q else None
-                return self._json(*app.date_live(de_la, cols, de_ev))
+                return self._json(*app.date_live(de_la, cols, de_ev, de_map))
             if u.path == "/api/profile":
                 return self._json(200, app.profile())
             if u.path == "/api/sesiuni" or u.path.startswith("/api/sesiuni/"):
@@ -373,9 +378,9 @@ def fa_handler(app: Aplicatie):
 
         def do_POST(self):
             u = urlparse(self.path)
+            d = self._corp()  # corpul se citeste intai: un 401 fara a-l consuma poate rupe conexiunea clientului
             if not self._autorizat(u):
                 return
-            d = self._corp()
             if u.path.startswith("/api/sesiuni/"):
                 return self._post_sesiuni(u, d)
             if u.path == "/api/start":
