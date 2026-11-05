@@ -141,7 +141,7 @@ table.valori { width: 100%; border-collapse: collapse; font-variant-numeric: tab
 .jurnal li.steag { color: var(--accent); font-weight: 600; }
 
 /* --- navigare și pagina „Sesiuni” --- */
-.nav { display: flex; gap: 6px; margin: 0 0 10px; }
+.nav { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
 .nav a {
   padding: 8px 14px;
   border: 1px solid var(--linie);

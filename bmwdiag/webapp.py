@@ -6,15 +6,20 @@ Inregistrarea ruleaza in firul recorderului: inchiderea browserului NU o opreste
 iar pagina reincarcata arata starea curenta (API-ul e citit la fiecare secunda).
 """
 import argparse
+import hmac
 import json
+import secrets
+import socket
 import sys
 import threading
+import time
 import webbrowser
+from http.cookies import SimpleCookie
 from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlparse
 
 from . import __version__, profiles, sesiuni, sistem
 from .ediabas_client import ECU_IMPLICIT
@@ -35,6 +40,40 @@ FISIERE_STATICE = {"/": ("index.html", "text/html"), "/index.html": ("index.html
                    "/vendor/uPlot.iife.min.js": ("vendor/uPlot.iife.min.js", "application/javascript"),
                    "/vendor/uPlot.min.css": ("vendor/uPlot.min.css", "text/css"),
                    "/vendor/LICENSE-uPlot.txt": ("vendor/LICENSE-uPlot.txt", "text/plain")}
+NUME_COOKIE = "bmw_cod"
+ALFABET_COD = "abcdefghjkmnpqrstuvwxyz23456789"  # fara caractere care se confunda (l, i, o, 0, 1)
+PAGINA_COD = """<!doctype html><html lang="ro"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Cod de acces – Logger BMW</title>
+<style>body{font-family:system-ui,sans-serif;max-width:28rem;margin:2rem auto;padding:0 1rem}
+input,button{font:inherit;padding:.6rem;margin:.3rem 0;width:100%;box-sizing:border-box}</style></head><body>
+<h1>Cod de acces</h1><p>@@MESAJ@@</p>
+<form method="get" action="/"><label>Codul din fereastra loggerului (de pe laptop)
+<input name="cod" autocomplete="off" autocapitalize="none" autofocus></label><button>Intră</button></form>
+</body></html>"""
+
+
+def genereaza_cod() -> str:
+    return "".join(secrets.choice(ALFABET_COD) for _ in range(8))
+
+
+def adrese_locale() -> list[str]:
+    """Adresele IPv4 ale laptopului in retea (pentru linkul de pe telefon); prima = ruta implicita."""
+    rez = []
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sk:
+            sk.connect(("10.255.255.255", 1))  # nu trimite nimic; doar alege interfata de iesire
+            rez.append(sk.getsockname()[0])
+    except OSError:
+        pass
+    try:
+        for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
+            if ip not in rez and not ip.startswith("127."):
+                rez.append(ip)
+    except OSError:
+        pass
+    return [ip for ip in rez if not ip.startswith("127.")]
+
+
 AVERTISMENT_MCP = "Cât timp înregistrezi, nu folosi serverul MCP din chat."
 
 
@@ -42,9 +81,13 @@ class Aplicatie:
     """Starea aplicatiei: un singur recorder activ odata; jurnalul e comun tuturor sesiunilor."""
 
     def __init__(self, sursa_tip: str = "ediabas", dir_date=DIR_DATE, dir_profile=profiles.DIR_PROFILE,
-                 fabrica_sursa=None, ecou=None, fake_tmot: float = 30.0, inactiv_live_s: float = INACTIV_LIVE_S):
+                 fabrica_sursa=None, ecou=None, fake_tmot: float = 30.0, inactiv_live_s: float = INACTIV_LIVE_S,
+                 cod: str | None = None, exceptie_loopback: bool = True):
         self.sursa_tip = sursa_tip
         self.inactiv_live_s = inactiv_live_s
+        # cod de acces: cerut oricui nu vine de pe laptop (127.0.0.1), ca sa nu poata porni/opri citirea oricine din wifi
+        self.cod = cod
+        self.exceptie_loopback = exceptie_loopback
         self.dir_date = Path(dir_date)
         self.dir_profile = Path(dir_profile)
         self._fabrica = fabrica_sursa or (lambda ecu: creeaza_sursa(sursa_tip, ecu, fake_tmot=fake_tmot))
@@ -206,8 +249,39 @@ def fa_handler(app: Aplicatie):
             except (ValueError, UnicodeDecodeError):
                 return {}
 
+        def _autorizat(self, u) -> bool:
+            """Fara cod configurat (doar localhost) totul e permis. Cu cod: cookie valid, sau ?cod=... (apoi cookie)."""
+            if not app.cod:
+                return True
+            if app.exceptie_loopback and self.client_address[0] in ("127.0.0.1", "::1"):
+                return True
+            c = SimpleCookie(self.headers.get("Cookie") or "")
+            if NUME_COOKIE in c and hmac.compare_digest(c[NUME_COOKIE].value.encode(), app.cod.encode()):
+                return True
+            primit = parse_qs(u.query).get("cod", [None])[0]
+            if primit is not None:
+                if hmac.compare_digest(primit.strip().lower().encode(), app.cod.encode()):
+                    rest = urlencode([(k, v) for k, v in parse_qs(u.query).items() for v in v if k != "cod"])
+                    self.send_response(302)
+                    self.send_header("Set-Cookie", f"{NUME_COOKIE}={app.cod}; Path=/; HttpOnly; SameSite=Strict; Max-Age=31536000")
+                    self.send_header("Location", u.path + ("?" + rest if rest else ""))
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return False
+                time.sleep(0.5)  # frana simpla la incercari repetate
+                mesaj = "Cod greșit. Încearcă din nou."
+            else:
+                mesaj = "Pentru a folosi loggerul de pe telefon ai nevoie de codul afișat în fereastra loggerului."
+            if u.path.startswith("/api/"):
+                self._json(401, {"eroare": "Cod de acces necesar."})
+            else:
+                self._trimite(401, PAGINA_COD.replace("@@MESAJ@@", mesaj).encode("utf-8"), "text/html")
+            return False
+
         def do_GET(self):
             u = urlparse(self.path)
+            if not self._autorizat(u):
+                return
             if u.path == "/api/stare":
                 return self._json(200, app.stare())
             if u.path == "/api/jurnal":
@@ -299,6 +373,8 @@ def fa_handler(app: Aplicatie):
 
         def do_POST(self):
             u = urlparse(self.path)
+            if not self._autorizat(u):
+                return
             d = self._corp()
             if u.path.startswith("/api/sesiuni/"):
                 return self._post_sesiuni(u, d)
@@ -334,7 +410,10 @@ def main(argv=None):
             flux.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
     ap = argparse.ArgumentParser(description="Logger EDIABAS cu interfață web locală (doar citire)")
     ap.add_argument("--sursa", choices=("ediabas", "fake"), default="ediabas")
-    ap.add_argument("--host", default="127.0.0.1", help="0.0.0.0 = accesibil și de pe telefon (implicit oprit)")
+    ap.add_argument("--host", default="127.0.0.1", help="0.0.0.0 = accesibil și de pe telefon, în aceeași rețea wifi "
+                    "(implicit oprit); cere cod de acces")
+    ap.add_argument("--cod", default=None, help="codul de acces din rețea (implicit: generat la fiecare pornire)")
+    ap.add_argument("--fara-cod", action="store_true", help="NU cere cod de acces din rețea (doar într-o rețea de încredere)")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--date", default=str(DIR_DATE))
     ap.add_argument("--deschide", action="store_true", help="deschide browserul")
@@ -348,7 +427,9 @@ def main(argv=None):
     except sistem.InstantaDejaPornita as e:
         print(e, file=sys.stderr)
         return 3
-    app = Aplicatie(sursa_tip=a.sursa, dir_date=a.date, ecou=print, fake_tmot=a.fake_tmot)
+    in_retea = a.host not in ("127.0.0.1", "localhost", "::1")
+    cod = None if (not in_retea or a.fara_cod) else (a.cod.strip().lower() if a.cod else genereaza_cod())
+    app = Aplicatie(sursa_tip=a.sursa, dir_date=a.date, ecou=print, fake_tmot=a.fake_tmot, cod=cod)
     try:
         srv = creeaza_server(app, a.host, a.port)
     except OSError as e:
@@ -361,8 +442,16 @@ def main(argv=None):
     adresa = f"http://127.0.0.1:{a.port}"
     print(f"Logger pornit: {adresa}  (sursa: {a.sursa}). Ctrl+C oprește tot.")
     print("ATENȚIE: " + AVERTISMENT_MCP)
-    if a.host != "127.0.0.1":
-        print(f"ATENȚIE: interfața e accesibilă din rețea ({a.host}).")
+    if in_retea:
+        print(f"ATENȚIE: interfața e accesibilă din rețea ({a.host}). Oricine din aceeași rețea poate vedea datele"
+              f"{' și poate porni/opri citirea' if not cod else ' (doar cu codul de acces)'}.")
+        ips = [a.host] if a.host not in ("0.0.0.0", "::") else (adrese_locale() or ["<adresa-laptopului>"])
+        for i, ip in enumerate(ips):
+            leg = f"http://{ip}:{a.port}/" + (f"?cod={quote(cod)}" if cod else "")
+            print(f"  De pe telefon (același wifi): {leg}" + ("   <- de obicei acesta (wifi-ul laptopului)" if i == 0 and len(ips) > 1 else ""))
+        if cod:
+            print(f"  Cod de acces: {cod}  (se cere o singură dată pe telefon; nu e nevoie pe laptop)")
+        print("  Dacă Windows întreabă despre firewall, permite accesul pe rețele PRIVATE.")
     app.jurnal.scrie(f"Server web pornit ({adresa}, sursa {a.sursa})")
     if a.deschide:
         webbrowser.open(adresa)

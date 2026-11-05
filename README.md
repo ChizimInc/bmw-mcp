@@ -27,6 +27,17 @@ start_logger.bat fake     :: interfața web cu date simulate, fără mașină (h
 start_logger.bat          :: mașina reală (cablu în priza OBD, contact pus)
 ```
 
+### Din telefon (același wifi)
+
+Laptopul rămâne conectat la cablu, iar tu pornești înregistrarea, pui marcaje și vezi starea de pe telefon:
+
+```
+start_logger.bat retea          :: mașina reală, accesibil și de pe telefon
+start_logger.bat fake retea     :: la fel, cu date simulate
+```
+
+În fereastra loggerului apar linkuri de forma `http://192.168.x.x:8765/?cod=xxxxxxxx`. Deschide-l pe telefon (primul link este de obicei cel de wifi); codul se cere o singură dată, apoi rămâne în telefon (cookie), iar adresa nu îl mai conține. Pe laptop nu e nevoie de cod. La prima pornire Windows poate întreba despre firewall: permite accesul pe rețele **private**. Fără `--fara-cod`, din rețea nu se poate face nimic fără cod (nici citit, nici pornit); codul se schimbă la fiecare pornire (sau fixezi unul cu `--cod`). Înregistrarea continuă pe laptop dacă telefonul se oprește sau pierde rețeaua. Laptopul nu adoarme cât înregistrează (nu închide capacul).
+
 Datele se salvează în `Documents\bmw-data\sesiuni\...`. Folderul se poate schimba cu variabila de mediu `BMW_DATA_DIR` sau cu `--date`.
 
 Cât timp loggerul înregistrează, nu folosi serverul MCP: EDIABAS acceptă o singură sesiune pe port.

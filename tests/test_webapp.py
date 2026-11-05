@@ -282,6 +282,66 @@ class TestWebapp(unittest.TestCase):
         self.assertEqual(self.j("/api/live/start", {"profil": "eveniment_rapid"})[0], 200)  # portul e liber
         self.j("/api/live/stop", {})
 
+    def test_cod_de_acces_din_retea(self):
+        """Cu cod: doar cine il are (cookie sau ?cod=) poate citi sau porni ceva; laptopul (loopback) e scutit."""
+        self.app.cod = "abc23xyz"
+        self.app.exceptie_loopback = False  # clientul de test e pe 127.0.0.1; il tratam ca pe un telefon
+
+        class FaraRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, *a, **k):
+                return None
+
+        deschide = urllib.request.build_opener(FaraRedirect).open
+
+        def cere(cale, cookie=None, corp=None):
+            req = urllib.request.Request(self.url + cale, data=None if corp is None else json.dumps(corp).encode(),
+                                         headers={"Content-Type": "application/json", **({"Cookie": cookie} if cookie else {})})
+            try:
+                with deschide(req, timeout=10) as r:
+                    return r.status, r.read(), r.headers
+            except urllib.error.HTTPError as e:
+                return e.code, e.read(), e.headers
+
+        cod, corp, _ = cere("/sesiuni.html")
+        self.assertEqual(cod, 401)
+        self.assertIn("Cod de acces", corp.decode("utf-8"))
+        self.assertEqual(cere("/api/stare")[0], 401)
+        self.assertEqual(cere("/api/start", corp={"profil": "eveniment_rapid"})[0], 401)
+        self.assertEqual(cere("/api/sesiuni")[0], 401)
+        self.assertFalse(self.app.activ)  # nimic nu a pornit
+        self.assertEqual(cere("/api/stare?cod=gresit")[0], 401)
+        self.assertEqual(cere("/api/stare", cookie="bmw_cod=gresit")[0], 401)
+        # cod corect (si cu majuscule, cum il scrie un telefon): cookie + redirect fara cod in adresa
+        cod, _, h = cere("/sesiuni.html?cod=ABC23XYZ&x=1")
+        self.assertEqual(cod, 302)
+        self.assertEqual(h["Location"], "/sesiuni.html?x=1")
+        cookie = h["Set-Cookie"]
+        self.assertIn("HttpOnly", cookie)
+        self.assertIn("SameSite=Strict", cookie)
+        c = cookie.split(";")[0]
+        self.assertEqual(cere("/sesiuni.html", cookie=c)[0], 200)
+        self.assertEqual(cere("/api/stare", cookie=c)[0], 200)
+        self.assertEqual(cere("/api/start", cookie=c, corp={"profil": "eveniment_rapid"})[0], 200)
+        self.assertTrue(self.app.activ)
+        self.assertEqual(cere("/api/stop", cookie=c, corp={})[0], 200)
+        # laptopul (loopback) nu are nevoie de cod
+        self.app.exceptie_loopback = True
+        self.assertEqual(cere("/api/stare")[0], 200)
+        # fara cod configurat (doar localhost) nu se cere nimic
+        self.app.cod = None
+        self.app.exceptie_loopback = False
+        self.assertEqual(cere("/api/stare")[0], 200)
+
+    def test_genereaza_cod_si_adrese(self):
+        from bmwdiag.webapp import ALFABET_COD, adrese_locale, genereaza_cod
+        coduri = {genereaza_cod() for _ in range(50)}
+        self.assertGreater(len(coduri), 45)
+        for c in coduri:
+            self.assertEqual(len(c), 8)
+            self.assertTrue(set(c) <= set(ALFABET_COD))
+        for ip in adrese_locale():
+            self.assertFalse(ip.startswith("127."))
+
     def test_dictionar_nume_ro(self):
         cod, corp, _ = self.cere("/nume_ro.json")
         d = json.loads(corp.decode("utf-8"))

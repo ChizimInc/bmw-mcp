@@ -189,6 +189,13 @@ API (JSON): `GET /api/stare`, `GET /api/jurnal?de_la=N`, `GET /api/profile`, `PO
 
 `start_logger.bat`: rulează `.venv\Scripts\python.exe -m bmwdiag.webapp` din folderul `bmw-mcp` și deschide `http://127.0.0.1:8765` în browser.
 
+Acces de pe telefon (același wifi): `start_logger.bat retea` (sau `--host 0.0.0.0`). Implicit serverul ascultă doar pe `127.0.0.1`. Când ascultă în rețea:
+- Se generează un cod de acces de 8 caractere (alfabet fără caractere ambigue; sau `--cod <cod>`), afișat în consolă împreună cu linkurile `http://<IP>:<port>/?cod=<cod>` (adresele IPv4 ale laptopului; prima e ruta implicită, de obicei wifi-ul). `--fara-cod` îl dezactivează, doar pentru o rețea de încredere.
+- Cererile care nu vin de pe `127.0.0.1` / `::1` trebuie să aibă cookie-ul `bmw_cod` sau parametrul `?cod=` (comparat în timp constant, fără diferență de majuscule). Cu codul bun: cookie `HttpOnly; SameSite=Strict` pe un an și redirect 302 către aceeași adresă fără `cod` (fragmentul `#...` se păstrează). Fără cod: 401 cu o pagină cu formular pentru pagini și JSON `{"eroare": ...}` pentru `/api/...`; un cod greșit așteaptă 0,5 s. Se aplică tuturor rutelor, GET și POST (inclusiv fișierele statice și descărcările din sesiuni, care conțin date ale mașinii).
+- Nu există HTTPS: codul circulă în clar în rețeaua locală. Nu expune portul în internet.
+- Înregistrarea rulează în firul recorderului pe laptop: telefonul care se oprește sau pierde rețeaua nu o întrerupe. Graficele Live se opresc singure după 60 s fără cereri (secțiunea 14).
+- Verificat (05.11.2026) cu un browser emulat ca telefon (375 px) pe adresa de rețea a laptopului: pagina cu cod, link cu cod, Start, marcaj, Stop, cu butoanele de marcaj de ~69 px înălțime. Nu verificat: un telefon real și firewall-ul Windows.
+
 ## 10. Etape și criterii de acceptare
 
 Etapa 0 – Fundația
