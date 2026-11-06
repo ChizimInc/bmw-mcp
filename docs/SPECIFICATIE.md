@@ -140,17 +140,18 @@ valoare = 12.0
 timp_s = 3
 ```
 
-Chei opționale: `rotativ = true` pe un `[[grup]]` (o singură citire din grup pe ciclu, pe rând) și `toate_senzorii = true` la nivel de profil (doar citire live, vezi secțiunea 14.5).
+Chei opționale: `marcaje_standard = true` la nivel de profil (adaugă marcajele 1 „Cuplez ambreiajul", 2 „Simt problema", 3 „Accelerez tare"; `[[marcaj]]` proprii vin după ele, cu taste libere, de la 4), `rotativ = true` pe un `[[grup]]` (o singură citire din grup pe ciclu, pe rând) și `toate_senzorii = true` la nivel de profil (doar citire live, vezi secțiunea 14.5).
 
 Alias-urile (`rpm`, `sarcina`...) devin numele coloanelor. Unitățile se iau din rezultatul `..._EINH` la prima citire și se scriu în `coloane.json`.
 
 Profile inițiale de livrat (toate cu cele trei marcaje de mai sus sau adaptate):
 
 1. `eveniment_rapid`: doar grupul „rapid" (MESSWERTE + FASTA2) și LAUFUNRUHE la 5 s. Pentru cuplarea ambreiajului și accelerări, la rece și la cald.
-2. `drum_lung_oras`: aceleași valori + sondele lambda (4 joburi) și FUNKTIONSSTATI la 10 s; `segment_minute = 10`, `erori_interval_minute = 10`. Pentru 30+ minute prin oraș.
-3. `ralanti_incalzire`: MESSWERTE + FASTA2 la fiecare ciclu, LAUFUNRUHE + sonde + FUNKTIONSSTATI + VVT la 10 s, GEMISCH la 60 s; steag `tmot_prag` la 40/60/70/80/90. Pentru pornirea la rece până la cald, mașina pe loc.
-4. `instantaneu_complet`: o singură trecere prin toate joburile utile de la secțiunea 4 (inclusiv identificare și erori, fără AIF în rezumat), apoi se oprește singur. Util la începutul fiecărei zile de test.
-5. `toate_senzorii`: DOAR pentru citirea live (pagina Live; la înregistrare e refuzat). Valorile rapide în fiecare ciclu (aceleași aliasuri ca la `drum_lung_oras`), plus toți senzorii: joburile `STATUS_*` se descoperă din SGBD și se citesc pe rând. Vezi secțiunea 14.5.
+2. `start_stop`: pornirea motorului la cald (turație, came, Valvetronic, sarcină, clapetă, lambda, baterie). Grupul rapid (MESSWERTE + VVT + FASTA2) în fiecare ciclu, `min_ciclu_ms` neset; sondele lambda și FUNKTIONSSTATI la 1 s; `marcaje_standard = true` plus 4 „Pornesc motorul", 5 „Pornire instabilă"; steag `cadere_dupa_pornire`. Se pornește cu contactul pus și motorul oprit.
+3. `drum_lung_oras`: aceleași valori + sondele lambda (4 joburi) și FUNKTIONSSTATI la 10 s; `segment_minute = 10`, `erori_interval_minute = 10`. Pentru 30+ minute prin oraș.
+4. `ralanti_incalzire`: MESSWERTE + FASTA2 la fiecare ciclu, LAUFUNRUHE + sonde + FUNKTIONSSTATI + VVT la 10 s, GEMISCH la 60 s; steag `tmot_prag` la 40/60/70/80/90. Pentru pornirea la rece până la cald, mașina pe loc.
+5. `instantaneu_complet`: o singură trecere prin toate joburile utile de la secțiunea 4 (inclusiv identificare și erori, fără AIF în rezumat), apoi se oprește singur. Util la începutul fiecărei zile de test.
+6. `toate_senzorii`: DOAR pentru citirea live (pagina Live; la înregistrare e refuzat). Valorile rapide în fiecare ciclu (aceleași aliasuri ca la `drum_lung_oras`), plus toți senzorii: joburile `STATUS_*` se descoperă din SGBD și se citesc pe rând. Vezi secțiunea 14.5.
 
 ## 7. Ciclul de citire
 

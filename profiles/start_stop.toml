@@ -1,0 +1,57 @@
+nume = "start_stop"
+descriere = "Pornirea motorului la cald (după o oprire): turație, came, Valvetronic, sarcină, clapetă, lambda, baterie, la frecvența maximă. Pornește-l cu contactul pus și motorul oprit, apoi pornește motorul."
+ecu = "MEV9N46L"
+segment_minute = 0            # 0 = un singur fișier
+durata_max_minute = 0         # 0 = până la Stop
+erori_la_start = true
+erori_la_stop = true
+erori_interval_minute = 0     # 0 = doar la start/stop (nu încărca linia în timpul pornirii)
+marcaje_standard = true       # 1 Cuplez ambreiajul, 2 Simt problema, 3 Accelerez tare
+instantaneu_la_start = ["IDENT", "ZIF_LESEN", "DATEN_REFERENZ_LESEN", "STATUS_GEMISCH", "STATUS_GEBERRAD_ADAPTION", "STATUS_FUNKTIONSSTATI", "STATUS_READINESS"]
+
+[[grup]]
+nume = "rapid"
+la_fiecare_s = 0              # 0 = în fiecare ciclu, fără pauze artificiale
+  [[grup.citire]]
+  job = "STATUS_MESSWERTE"
+  # came_ev / came_adm (WNWKWA / WNWKWE) sunt documentate în STATUS_MESSWERTE, deci nu costă un apel în plus
+  valori = { rpm = "STAT_NMOT_WERT", rpm_tinta = "STAT_NSOL_WERT", tmot = "STAT_TMOT_WERT", ub = "STAT_UB_WERT", fr1 = "STAT_FR_WERT", fr2 = "STAT_FR2_WERT", came_ev = "STAT_WNWKWA_WERT", came_adm = "STAT_WNWKWE_WERT" }
+  [[grup.citire]]
+  job = "STATUS_VVT"
+  valori = { vvt_iw = "STAT_VVTIW_WERT", vvt_sw = "STAT_VVTSW_WERT", vvt_iw2 = "STAT_VVTIW2_WERT", vvt_sw2 = "STAT_VVTSW2_WERT" }
+  [[grup.citire]]
+  job = "STATUS_FASTA2"
+  valori = { sarcina = "STAT_RL_WERT", clapeta_tinta = "STAT_WDKS_WERT", pedala = "STAT_WPED_WERT" }
+
+[[grup]]
+nume = "lent"
+la_fiecare_s = 1
+  [[grup.citire]]
+  job = "STATUS_L_SONDE"
+  valori = { sonda_pre_b1 = "STAT_L_SONDE_WERT" }
+  [[grup.citire]]
+  job = "STATUS_L_SONDE_2"
+  valori = { sonda_pre_b2 = "STAT_L_SONDE_2_WERT" }
+  [[grup.citire]]
+  job = "STATUS_FUNKTIONSSTATI"
+  valori = { regl_ralanti = "STAT_LL_EIN", regl_lambda1 = "STAT_LR_EIN", regl_lambda2 = "STAT_LR2_EIN" }
+
+[[marcaj]]
+eticheta = "Pornesc motorul"
+tasta = "4"
+[[marcaj]]
+eticheta = "Pornire instabilă"
+tasta = "5"
+
+[[steag]]
+nume = "cadere_dupa_pornire"
+tip = "cadere"
+camp = "rpm"
+cu = 400
+in_s = 2
+conditii = ["rpm > 300", "tmot > 60"]
+[[steag]]
+nume = "tmot_prag"
+tip = "trece_prag"
+camp = "tmot"
+praguri = [80, 90]

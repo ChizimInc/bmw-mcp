@@ -32,6 +32,29 @@ class TestProfile(unittest.TestCase):
         self.assertEqual([m["tasta"] for m in p.marcaje], ["1", "2", "3"])
         self.assertIn("eveniment_rapid", profiles.lista())
 
+    def test_marcaje_standard(self):
+        p = self.incarca_text("marcaje_standard = true\n" + BAZA)
+        self.assertEqual([m["tasta"] for m in p.marcaje], ["1", "2", "3"])
+        self.assertEqual(p.marcaje[0]["eticheta"], "Cuplez ambreiajul")
+        p = self.incarca_text("marcaje_standard = true\n" + BAZA + '\n[[marcaj]]\neticheta = "Altul"\ntasta = "4"\n')
+        self.assertEqual([m["tasta"] for m in p.marcaje], ["1", "2", "3", "4"])
+        self.assertEqual(self.incarca_text(BAZA).marcaje, [])
+        self.assertRespins("marcaje_standard = true\n" + BAZA + '\n[[marcaj]]\neticheta = "X"\ntasta = "2"\n', "tasta '2'")
+        self.assertRespins('marcaje_standard = "da"\n' + BAZA, "marcaje_standard")
+
+    def test_profil_start_stop(self):
+        from bmwdiag import guard
+        p = profiles.incarca("start_stop")
+        self.assertEqual(p.ecu, "MEV9N46L")
+        self.assertEqual(len(p.aliasuri()), len(set(p.aliasuri())))
+        self.assertTrue(all(guard.este_permis(j) for j in p.toate_joburile()))
+        rapid = next(g for g in p.grupuri if g.nume == "rapid")
+        self.assertEqual(rapid.la_fiecare_s, 0)
+        self.assertEqual([c.job for c in rapid.citiri], ["STATUS_MESSWERTE", "STATUS_VVT", "STATUS_FASTA2"])
+        self.assertEqual(p.min_ciclu_ms, 0)
+        self.assertEqual([m["tasta"] for m in p.marcaje][:3], ["1", "2", "3"])
+        self.assertEqual(p.marcaje[0]["eticheta"], "Cuplez ambreiajul")
+
     def test_minim(self):
         p = self.incarca_text(BAZA)
         self.assertEqual(p.aliasuri(), ["rpm"])

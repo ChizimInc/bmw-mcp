@@ -19,10 +19,16 @@ _REZULTAT = re.compile(r"^\w+$")
 CHEI_PROFIL = {"nume", "descriere", "ecu", "segment_minute", "durata_max_minute", "cicluri_max", "min_ciclu_ms",
                "erori_la_start",
                "erori_la_stop", "erori_interval_minute", "instantaneu_la_start", "grup", "marcaj", "steag",
-               "toate_senzorii"}
+               "toate_senzorii", "marcaje_standard"}
 CHEI_GRUP = {"nume", "la_fiecare_s", "rotativ", "citire"}
 CHEI_CITIRE = {"job", "valori", "parametri"}
 CHEI_MARCAJ = {"eticheta", "tasta"}
+# marcajele comune tuturor profilelor de eveniment; se adauga cu `marcaje_standard = true` (urmate de [[marcaj]] proprii)
+MARCAJE_STANDARD = (
+    {"eticheta": "Cuplez ambreiajul", "tasta": "1"},
+    {"eticheta": "Simt problema", "tasta": "2"},
+    {"eticheta": "Accelerez tare", "tasta": "3"},
+)
 
 
 class ProfilInvalid(Exception):
@@ -153,7 +159,12 @@ def din_dict(d: dict, sursa_toml: str = "") -> Profil:
 
     if not isinstance(d.get("toate_senzorii", False), bool):
         p.append("profil: 'toate_senzorii' trebuie să fie true sau false")
+    if not isinstance(d.get("marcaje_standard", False), bool):
+        p.append("profil: 'marcaje_standard' trebuie să fie true sau false")
     marcaje, taste = [], set()
+    if d.get("marcaje_standard", False) is True:
+        marcaje = [dict(m) for m in MARCAJE_STANDARD]
+        taste = {m["tasta"] for m in marcaje}
     for k, m in enumerate(d.get("marcaj", []), start=1):
         um = f"marcajul {k}"
         chei(m, CHEI_MARCAJ, um)

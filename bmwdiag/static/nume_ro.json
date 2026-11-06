@@ -13,6 +13,7 @@
     "sarcina": {"eticheta": "Sarcina motorului (umplere)", "unitate_afisata": "%", "grup": "Sarcină și cuplu"},
     "sarcina_tinta": {"eticheta": "Sarcina țintă", "unitate_afisata": "%", "grup": "Sarcină și cuplu"},
     "clapeta": {"eticheta": "Deschiderea clapetei", "unitate_afisata": "% clapetă", "grup": "Sarcină și cuplu"},
+    "clapeta_tinta": {"eticheta": "Clapeta, valoarea setată", "unitate_afisata": "% clapetă", "grup": "Sarcină și cuplu"},
     "avans": {"eticheta": "Avansul la aprindere", "unitate_afisata": "°", "grup": "Came și avans"},
     "came_ev": {"eticheta": "Unghiul arborelui cu came, evacuare", "unitate_afisata": "°KW", "grup": "Came și avans"},
     "came_adm": {"eticheta": "Unghiul arborelui cu came, admisie", "unitate_afisata": "°KW", "grup": "Came și avans"},
